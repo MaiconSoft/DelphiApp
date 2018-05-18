@@ -1,0 +1,17 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<BorlandProject>
+	<Transactions>
+    <Transaction>2015/09/13 10:40:59.000.144,=C:\Users\Maicon\Documents\Embarcadero\Studio\Projects\Unit1.pas</Transaction>
+    <Transaction>2015/09/13 19:10:31.000.454,=C:\Users\Maicon\Documents\Embarcadero\Studio\Projects\Unit1.pas</Transaction>
+    <Transaction>2015/09/13 20:12:16.000.114,=C:\Users\Maicon\Documents\Embarcadero\Studio\Projects\Unit1.pas</Transaction>
+    <Transaction>2015/09/13 20:43:04.000.260,=C:\Users\Maicon\Documents\Embarcadero\Studio\Projects\Unit1.pas</Transaction>
+    <Transaction>2015/09/18 20:12:25.000.267,=C:\Users\Maicon\Documents\Embarcadero\Studio\Projects\Unit1.pas</Transaction>
+    <Transaction>2015/09/18 20:13:02.000.578,D:\Xe2\AG_Geradores\main.pas=C:\Users\Maicon\Documents\Embarcadero\Studio\Projects\Unit1.pas</Transaction>
+    <Transaction>2015/09/18 20:13:02.000.578,D:\Xe2\AG_Geradores\main.dfm=C:\Users\Maicon\Documents\Embarcadero\Studio\Projects\Unit1.dfm</Transaction>
+    <Transaction>2015/09/18 20:13:14.000.185,D:\Xe2\AG_Geradores\AG_Geradores.dproj=C:\Users\Maicon\Documents\Embarcadero\Studio\Projects\Project1.dproj</Transaction>
+    <Transaction>2015/09/19 19:11:28.000.208,=D:\Xe2\AG_Geradores\Unit1.pas</Transaction>
+    <Transaction>2015/09/19 19:12:24.000.142,D:\Xe2\AG_Geradores\Unit1.pas=D:\Xe2\AG_Geradores\BitArray.pas</Transaction>
+    <Transaction>2015/09/19 19:47:49.000.628,=D:\Xe2\AG_Geradores\Unit1.pas</Transaction>
+    <Transaction>2015/09/19 19:48:11.000.356,D:\Xe2\AG_Geradores\Unit1.pas=D:\Xe2\AG_Geradores\ProblemGerator.pas</Transaction>
+  </Transactions>
+</BorlandProject>
