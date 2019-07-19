@@ -1,0 +1,48 @@
+﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+    <PropertyGroup>
+        <ProjectGuid>{79090FCC-9B74-4BD5-B657-536CA41405E7}</ProjectGuid>
+    </PropertyGroup>
+    <ItemGroup>
+        <Projects Include="FirmataPack.dproj">
+            <Dependencies/>
+        </Projects>
+        <Projects Include="..\..\Samples\Simple Application\SimpleApplication.dproj">
+            <Dependencies/>
+        </Projects>
+    </ItemGroup>
+    <ProjectExtensions>
+        <Borland.Personality>Default.Personality.12</Borland.Personality>
+        <Borland.ProjectType/>
+        <BorlandProject>
+            <Default.Personality/>
+        </BorlandProject>
+    </ProjectExtensions>
+    <Target Name="FirmataPack">
+        <MSBuild Projects="FirmataPack.dproj"/>
+    </Target>
+    <Target Name="FirmataPack:Clean">
+        <MSBuild Projects="FirmataPack.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="FirmataPack:Make">
+        <MSBuild Projects="FirmataPack.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="SimpleApplication">
+        <MSBuild Projects="..\..\Samples\Simple Application\SimpleApplication.dproj"/>
+    </Target>
+    <Target Name="SimpleApplication:Clean">
+        <MSBuild Projects="..\..\Samples\Simple Application\SimpleApplication.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="SimpleApplication:Make">
+        <MSBuild Projects="..\..\Samples\Simple Application\SimpleApplication.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="Build">
+        <CallTarget Targets="FirmataPack;SimpleApplication"/>
+    </Target>
+    <Target Name="Clean">
+        <CallTarget Targets="FirmataPack:Clean;SimpleApplication:Clean"/>
+    </Target>
+    <Target Name="Make">
+        <CallTarget Targets="FirmataPack:Make;SimpleApplication:Make"/>
+    </Target>
+    <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
+</Project>

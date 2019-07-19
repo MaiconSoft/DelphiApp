@@ -1,0 +1,11 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<BorlandProject>
+  <Transactions>
+    <Transaction>2019/07/19 18:21:23.961,=rtl.dcp</Transaction>
+    <Transaction>2019/07/19 18:21:45.695,=D:\Programação\Git\Firmata Delphi\Source\Firmata.pas</Transaction>
+    <Transaction>2019/07/19 18:22:44.995,D:\Programação\Git\Firmata Delphi\Packpage\10.2\FirmataPack.dproj=D:\Programação\Local\Delphi\Fontes\Package1.dproj</Transaction>
+    <Transaction>2019/07/19 18:26:33.934,=D:\Programação\Git\Firmata Delphi\Source\Resource\Icon24.bmp</Transaction>
+    <Transaction>2019/07/19 18:31:56.970,=D:\Programação\Git\Firmata Delphi\Packpage\10.2\Unit1.pas</Transaction>
+    <Transaction>2019/07/19 18:32:10.113,D:\Programação\Git\Firmata Delphi\Source\Firmata.Types.pas=D:\Programação\Git\Firmata Delphi\Packpage\10.2\Unit1.pas</Transaction>
+  </Transactions>
+</BorlandProject>
