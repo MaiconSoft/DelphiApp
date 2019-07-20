@@ -2,7 +2,8 @@ program SimpleApplication;
 
 uses
   Vcl.Forms,
-  uMain in 'uMain.pas' {Form1};
+  uMain in 'uMain.pas' {Form1},
+  Firmata in '..\..\Source\Firmata.pas';
 
 {$R *.res}
 
