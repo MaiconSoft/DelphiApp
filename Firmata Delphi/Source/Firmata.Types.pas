@@ -42,6 +42,13 @@ type
     Major, Minor: byte;
   end;
 
+  TPinMode = (pmInput = PIN_MODE_INPUT, pmOutput, pmAnalog, pmPWM, pmDevVo,
+    pmShift, pmI2C, pmOneWire, pmStepper, pmEncoder, pmSerial, pmPullUp,
+    pmIgnore = PIN_MODE_IGNORE);
+
+  // pin digital state
+  TPinState = (psLow = 0, psHigh = 1);
+
   TAnalogParse = record
     Cmd: byte;
     Buffer: array [0 .. 1] of byte;

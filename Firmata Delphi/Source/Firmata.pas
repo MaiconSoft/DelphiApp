@@ -33,7 +33,7 @@ type
     procedure AskFirmware;
     procedure Write(Buf: array of Byte;
       IncludeHeadAndTail: Boolean = True); overload;
-    procedure Write(Buf: Byte; IncludeHeadAndTail: Boolean = True);
+    procedure Write(Buf: Byte; IncludeHeadAndTail: Boolean = True); overload;
     procedure WriteHead;
     procedure WriteTail;
     procedure InitPinInfo;
@@ -51,6 +51,19 @@ type
     procedure AskBoardCapabilities;
     procedure AskReportAnalog(index: Integer);
     procedure AskReportDigital(index: Integer);
+    function digitalRead(pin: Byte): TPinState;
+    function analogRead(pin: Byte): Word;
+    function ReturnAnalogPinNumber(pin: Byte): Byte;
+    procedure setPinMode(pin: Byte; mode: TPinMode);
+    procedure digitalWrite(pin: Byte; value: TPinState);
+    procedure analogWrite(pin: Byte; value: Word);
+    procedure digitalReport(Port: Byte; enab: Boolean);
+    procedure analogReport(pin: Byte; enab: Boolean);
+    function GetDigital(pin: Byte): TPinState;
+    procedure SetDigital(pin: Byte; const value: TPinState);
+    function GetAnalog(pin: Byte): Word;
+    procedure SetAnalog(pin: Byte; const value: Word);
+    procedure PrintPinInfo(Info: TStrings);
 
   protected
     { Protected declarations }
@@ -64,6 +77,8 @@ type
     procedure SaveSettings;
     property FirmwareName: string read GetFirmwareName;
     property Ready: Boolean read FReady;
+    property Digital[pin: Byte]: TPinState read GetDigital write SetDigital;
+    property Analog[pin: Byte]: Word read GetAnalog write SetAnalog;
   published
     { Published declarations }
     property Serial: TComPort read FSerial;
@@ -133,7 +148,7 @@ end;
 
 destructor TFirmata.Destroy;
 var
-  key: word;
+  key: Word;
 begin
   Stop;
   Serial.free;
@@ -153,6 +168,16 @@ end;
 function TFirmata.SettingsFileName: string;
 begin
   result := ChangeFileExt(ParamStr(0), '.ini')
+end;
+
+function TFirmata.GetAnalog(pin: Byte): Word;
+begin
+  result := analogRead(pin);
+end;
+
+function TFirmata.GetDigital(pin: Byte): TPinState;
+begin
+  result := digitalRead(pin);
 end;
 
 function TFirmata.GetFirmwareName: string;
@@ -360,7 +385,7 @@ var
   msg: string;
   portID: Byte;
   idx: Integer;
-  c: word;
+  c: Word;
 begin
   msg := '';
   portID := Buffer.Data[1] and $0F;
@@ -375,12 +400,22 @@ begin
     FOnSerialReceve(Self, portID, msg);
 end;
 
+procedure TFirmata.SetAnalog(pin: Byte; const value: Word);
+begin
+  analogWrite(pin, value);
+end;
+
+procedure TFirmata.SetDigital(pin: Byte; const value: TPinState);
+begin
+  digitalWrite(pin, value);
+end;
+
 procedure TFirmata.SerialData;
 var
   msg: string;
   portID: Byte;
   idx: Integer;
-  c: word;
+  c: Word;
 begin
   msg := '';
   idx := 1;
@@ -414,8 +449,8 @@ begin
       SerialMessage;
     STRING_DATA:
       SerialData;
-    else
-      // Do nothing for unknow messages
+  else
+    // Do nothing for unknow messages
   end;
 end;
 
@@ -518,7 +553,7 @@ begin
     WriteTail;
 end;
 
-procedure TFirmata.Write(Buf: Byte; IncludeHeadAndTail: Boolean); overload;
+procedure TFirmata.Write(Buf: Byte; IncludeHeadAndTail: Boolean = True);
 
 begin
   if IncludeHeadAndTail then
@@ -526,6 +561,75 @@ begin
   Serial.Write(Buf, 1);
   if IncludeHeadAndTail then
     WriteTail;
+end;
+
+procedure TFirmata.setPinMode(pin: Byte; mode: TPinMode);
+begin
+  Write([SET_PIN_MODE, ReturnAnalogPinNumber(pin), Ord(mode)], false);
+  PinsInfo[pin].mode := Ord(mode);
+  PinsInfo[pin].value := 0;
+end;
+
+procedure TFirmata.digitalWrite(pin: Byte; value: TPinState);
+begin
+  Write([SET_DIGITAL_PIN_VALUE, ReturnAnalogPinNumber(pin), Ord(value)], false);
+  PinsInfo[pin].value := Ord(value);
+end;
+
+function TFirmata.digitalRead(pin: Byte): TPinState;
+begin
+  result := PinsInfo[pin].value > 0;
+end;
+
+procedure TFirmata.digitalReport(Port: Byte; enab: Boolean);
+begin
+  Write([REPORT_DIGITAL OR Port, Ord(enab)], false);
+end;
+
+procedure TFirmata.analogReport(pin: Byte; enab: Boolean);
+begin
+  Write([REPORT_DIGITAL OR pin, Ord(enab)], false);
+end;
+
+function TFirmata.ReturnAnalogPinNumber(pin: Byte): Byte;
+begin
+  if pin >= $A0 then
+  begin
+    result := AnalogPins[(pin and $0F)];
+  end
+  else
+    result := pin;
+end;
+
+procedure TFirmata.analogWrite(pin: Byte; value: Word);
+var
+  Buf: array [0 .. 2] of Byte;
+begin
+  Buf[0] := ANALOG_MESSAGE OR pin;
+  Buf[1] := value AND $7F;
+  Buf[2] := (value shr 7) AND $7F;
+
+  Write(Buf, false);
+  PinsInfo[pin].value := value;
+end;
+
+function TFirmata.analogRead(pin: Byte): Word;
+begin
+  pin := ReturnAnalogPinNumber(pin);
+  analogRead := PinsInfo[pin].value;
+end;
+
+procedure TFirmata.PrintPinInfo(Info: TStrings);
+var
+  pin: TPin;
+  idx: Integer;
+begin
+  idx := 0;
+  for pin in PinsInfo do
+  begin
+    Info.Add(idx.Tostring + ':' + pin.analog_channel.Tostring);
+    Inc(idx);
+  end;
 end;
 
 end.
