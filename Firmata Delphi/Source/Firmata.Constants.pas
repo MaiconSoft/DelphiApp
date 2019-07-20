@@ -132,6 +132,7 @@ const
   ANALOG_CHANNEL_NONE = $7F;
   MODE_NONE = $FF;
 
+  CAPABILITY_PIN_SEPARATOR = $7F;
 
 implementation
 

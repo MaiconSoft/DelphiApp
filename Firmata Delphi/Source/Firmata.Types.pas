@@ -2,11 +2,19 @@ unit Firmata.Types;
 
 interface
 
+uses Firmata.Constants, System.Generics.Collections;
+
 type
+  TI2C_Register = TDictionary<Word, Word>;
+  TI2C_memory = TDictionary<Word, TI2C_Register>;
+
+  TModeResolution = array [0 .. 15] of byte;
+
   TPin = record
     mode: byte;
     analog_channel: byte;
     supported_modes: UInt64;
+    resolution: TModeResolution;
     value: integer;
   end;
 
@@ -15,16 +23,20 @@ type
   TSerialInfo = record
     Count: integer;
     IsOpended: Boolean;
-    Buffer: TSerialBuffer;
+    Data: TSerialBuffer;
     procedure Append(value: byte);
     procedure Clear;
+    function ParseChar(const pos: integer): Char;
+    function ToString(const Index: integer): string;
   end;
 
   TAnalogPins = array [0 .. 15] of byte;
   TPinInfos = array [0 .. 127] of TPin;
 
-  TCallback = procedure(message: array of byte);
-  TCallbacks = array [0 .. 15] of TCallback;
+  TNotifySerialEvent = procedure(Sender: TObject; PortId: integer; msg: string)
+    of object;
+
+  TNotifySerialDataEvent = procedure(Sender: TObject; msg: string) of object;
 
   TVersion = record
     Major, Minor: byte;
@@ -106,13 +118,31 @@ end;
 
 procedure TSerialInfo.Append(value: byte);
 begin
-  Buffer[Count] := value;
+  Data[Count] := value;
   Inc(Count);
 end;
 
 procedure TSerialInfo.Clear;
 begin
   Count := 0;
+end;
+
+function TSerialInfo.ParseChar(const pos: integer): Char;
+begin
+  Result := Char((Data[pos] and $7F) or ((Data[pos + 1] and $7F) shl 7));
+end;
+
+function TSerialInfo.ToString(const Index: integer): string;
+var
+  idx: integer;
+begin
+  idx := Index;
+  Result := '';
+  while idx < Count do
+  begin
+    Result := Result + ParseChar(idx);
+    Inc(idx, 2);
+  end;
 end;
 
 end.

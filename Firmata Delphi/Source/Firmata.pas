@@ -9,25 +9,31 @@ unit Firmata;
 interface
 
 uses
-  System.SysUtils, System.Classes, Firmata.Constants, Firmata.Types, CPort;
+  System.SysUtils, System.Classes, Firmata.Constants, Firmata.Types, CPort,
+  System.Generics.Collections;
 
 type
   TFirmata = class(TComponent)
   private
     { Private declarations }
     FSerial: TComPort;
+    I2CMemory: TI2C_memory;
     FFirmwareName: string;
     AnalogPins: TAnalogPins;
     PinsInfo: TPinInfos;
-    SerialCalbacks: TCallbacks;
     Version: TVersion;
     Buffer: TSerialInfo;
+    FReady: Boolean;
+    FOnSerialReceve: TNotifySerialEvent;
+    FOnSerialDataReceve: TNotifySerialDataEvent;
     function GetFirmwareName: string;
     function SettingsFileName: string;
     procedure Process(value: Byte);
     procedure HandleRx(Sender: TObject; const Buffer; Count: Integer);
     procedure AskFirmware;
-    procedure Write(Buf: array of Byte; IncludeHeadAndTail: Boolean = True);
+    procedure Write(Buf: array of Byte;
+      IncludeHeadAndTail: Boolean = True); overload;
+    procedure Write(Buf: Byte; IncludeHeadAndTail: Boolean = True);
     procedure WriteHead;
     procedure WriteTail;
     procedure InitPinInfo;
@@ -35,6 +41,16 @@ type
     procedure ReadDigital(Cmd: Byte);
     procedure ReadVersion;
     procedure ProcessEx;
+    procedure ReportFirmware;
+    procedure CapabilityResponse;
+    procedure AnalogMappingResponse;
+    procedure PinStateResponse;
+    procedure I2cReply;
+    procedure SerialMessage;
+    procedure SerialData;
+    procedure AskBoardCapabilities;
+    procedure AskReportAnalog(index: Integer);
+    procedure AskReportDigital(index: Integer);
 
   protected
     { Protected declarations }
@@ -47,9 +63,14 @@ type
     function Stop: Boolean;
     procedure SaveSettings;
     property FirmwareName: string read GetFirmwareName;
+    property Ready: Boolean read FReady;
   published
     { Published declarations }
     property Serial: TComPort read FSerial;
+    property OnSerialReceve: TNotifySerialEvent read FOnSerialReceve
+      write FOnSerialReceve;
+    property OnSerialDataReceve: TNotifySerialDataEvent read FOnSerialDataReceve
+      write FOnSerialDataReceve;
   end;
 
 procedure Register;
@@ -63,6 +84,29 @@ end;
 
 { TFirmata }
 
+procedure TFirmata.AskReportAnalog(index: Integer);
+begin
+  Write(REPORT_ANALOG or index);
+end;
+
+procedure TFirmata.AskReportDigital(index: Integer);
+begin
+  Write(REPORT_DIGITAL or index);
+end;
+
+procedure TFirmata.AskBoardCapabilities();
+var
+  i: Integer;
+begin
+  write([ANALOG_MAPPING_QUERY]);
+  write([CAPABILITY_QUERY]);
+  for i := 0 to 15 do
+  begin
+    AskReportAnalog(i);
+    AskReportDigital(i);
+  end;
+end;
+
 procedure TFirmata.AskFirmware;
 begin
   write([REPORT_FIRMWARE]);
@@ -73,7 +117,9 @@ begin
   inherited;
   Buffer.Clear;
   Buffer.IsOpended := false;
+  FReady := false;
   FSerial := TComPort.Create(nil);
+  I2CMemory := TI2C_memory.Create();
   with FSerial do
   begin
     DataBits := dbEight;
@@ -86,9 +132,16 @@ begin
 end;
 
 destructor TFirmata.Destroy;
+var
+  key: word;
 begin
   Stop;
   Serial.free;
+  for key in I2CMemory.Keys do
+  begin
+    I2CMemory[key].free;
+  end;
+  I2CMemory.free;
   inherited;
 end;
 
@@ -195,24 +248,174 @@ begin
   end;
 end;
 
+procedure TFirmata.ReportFirmware;
+var
+  Major, Minor: Byte;
+begin
+  Major := Buffer.Data[1];
+  Minor := Buffer.Data[2];
+  FFirmwareName := Format('%s - %d.%d', [Buffer.Tostring(3), Major, Minor]);
+end;
+
+procedure TFirmata.CapabilityResponse;
+var
+  idx, pin: Integer;
+  isResolution: Boolean;
+  mode: Byte;
+begin
+  idx := 1;
+  mode := 0;
+  isResolution := false;
+  pin := 0;
+  for pin := 0 to 127 do
+  begin
+    PinsInfo[pin].supported_modes := 0;
+  end;
+
+  while idx < Buffer.Count do
+  begin
+    if (Buffer.Data[idx] = CAPABILITY_PIN_SEPARATOR) then
+    begin
+      Inc(pin);
+      isResolution := false;
+    end;
+
+    if (isResolution) then
+    begin
+      PinsInfo[pin].resolution[mode] := Buffer.Data[idx];
+    end
+    else
+    begin
+      mode := Buffer.Data[idx];
+      PinsInfo[pin].supported_modes := PinsInfo[pin].supported_modes or
+        (1 shl mode);
+    end;
+
+    isResolution := not isResolution;
+    Inc(idx);
+  end;
+  FReady := True;
+end;
+
+procedure TFirmata.AnalogMappingResponse;
+var
+  value, i, aPin: Byte;
+begin
+  aPin := 0;
+  for i := 0 to Buffer.Count - 2 do
+  begin
+    value := Buffer.Data[i + 1];
+    PinsInfo[i].analog_channel := value;
+    if value <> ANALOG_CHANNEL_NONE then
+    begin
+      AnalogPins[aPin] := i;
+      Inc(aPin);
+    end;
+  end;
+end;
+
+procedure TFirmata.PinStateResponse;
+var
+  pin, i: Byte;
+begin
+  if Buffer.Count < 4 then
+    exit;
+
+  pin := Buffer.Data[1];
+  PinsInfo[pin].mode := Buffer.Data[2];
+  PinsInfo[pin].value := Buffer.Data[3];
+
+  if (Buffer.Count > 4) then
+  begin
+    for i := 1 to Buffer.Count - 3 do
+      PinsInfo[pin].value := (PinsInfo[pin].value) or
+        (Buffer.Data[3 + i] shl (7 * i));
+  end;
+end;
+
+procedure TFirmata.I2cReply;
+var
+  sAddres, Data, reg: Byte;
+  idx: Integer;
+begin
+  idx := 0;
+  sAddres := Buffer.Data[1] or (Buffer.Data[2] shl 7);
+  if not I2CMemory.ContainsKey(sAddres) then
+    I2CMemory.Add(sAddres, TI2C_Register.Create());
+
+  while idx < Buffer.Count do
+  begin
+    reg := Buffer.Data[idx] or (Buffer.Data[idx + 1] shl 7);
+    Data := Buffer.Data[idx + 2] or (Buffer.Data[idx + 3] shl 7);
+    if I2CMemory[sAddres].ContainsKey(reg) then
+      I2CMemory[sAddres][reg] := Data
+    else
+      I2CMemory[sAddres].Add(reg, Data);
+    Inc(idx, 4);
+  end;
+end;
+
+procedure TFirmata.SerialMessage;
+var
+  msg: string;
+  portID: Byte;
+  idx: Integer;
+  c: word;
+begin
+  msg := '';
+  portID := Buffer.Data[1] and $0F;
+  idx := 2;
+  while idx < Buffer.Count do
+  begin
+    c := Buffer.Data[idx] or (Buffer.Data[idx + 1] shl 7);
+    msg := msg + char(c);
+    Inc(idx, 2);
+  end;
+  if Assigned(FOnSerialReceve) then
+    FOnSerialReceve(Self, portID, msg);
+end;
+
+procedure TFirmata.SerialData;
+var
+  msg: string;
+  portID: Byte;
+  idx: Integer;
+  c: word;
+begin
+  msg := '';
+  idx := 1;
+  while idx < Buffer.Count do
+  begin
+    c := (Buffer.Data[idx] and $7F) or ((Buffer.Data[idx + 1] and $7F) shl 7);
+    msg := msg + char(c);
+    Inc(idx, 2);
+  end;
+  if Assigned(FOnSerialDataReceve) then
+    FOnSerialDataReceve(Self, msg);
+end;
 
 procedure TFirmata.ProcessEx;
 begin
-  case Buffer[0] of
+  case Buffer.Data[0] of
     REPORT_FIRMWARE:
-      ;
+      begin
+        ReportFirmware;
+        AskBoardCapabilities();
+      end;
     CAPABILITY_RESPONSE:
-      ;
+      CapabilityResponse;
     ANALOG_MAPPING_RESPONSE:
-      ;
+      AnalogMappingResponse;
     PIN_STATE_RESPONSE:
-      ;
+      PinStateResponse;
     I2C_REPLY:
-      ;
+      I2cReply;
     SERIAL_MESSAGE:
-      ;
+      SerialMessage;
     STRING_DATA:
-      ;
+      SerialData;
+    else
+      // Do nothing for unknow messages
   end;
 end;
 
@@ -224,7 +427,7 @@ begin
   begin
     if value = END_SYSEX then
     begin
-      // process buffer
+      ProcessEx;
       Buffer.Clear;
       Buffer.IsOpended := false;
     end
@@ -238,17 +441,17 @@ begin
       ANALOG_MESSAGE:
         begin
           ReadAnalog(value);
-          Exit;
+          exit;
         end;
       DIGITAL_MESSAGE:
         begin
           ReadDigital(value);
-          Exit;
+          exit;
         end;
       REPORT_VERSION:
         begin
           ReadVersion;
-          Exit;
+          exit;
         end;
     end;
 
@@ -281,7 +484,7 @@ function TFirmata.Stop: Boolean;
 begin
   result := True;
   if not Serial.Connected then
-    Exit;
+    exit;
   try
     Serial.Close();
   except
@@ -311,6 +514,16 @@ begin
   if IncludeHeadAndTail then
     WriteHead;
   Serial.Write(Buf, Length(Buf));
+  if IncludeHeadAndTail then
+    WriteTail;
+end;
+
+procedure TFirmata.Write(Buf: Byte; IncludeHeadAndTail: Boolean); overload;
+
+begin
+  if IncludeHeadAndTail then
+    WriteHead;
+  Serial.Write(Buf, 1);
   if IncludeHeadAndTail then
     WriteTail;
 end;
