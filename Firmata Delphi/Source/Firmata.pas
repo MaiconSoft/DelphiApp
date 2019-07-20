@@ -64,6 +64,16 @@ type
     function GetAnalog(pin: Byte): Word;
     procedure SetAnalog(pin: Byte; const value: Word);
     procedure PrintPinInfo(Info: TStrings);
+    procedure SerialWrite(portID: TSerialPortID; Msg: String);
+    procedure SerialRead(portID: TSerialPortID; maxBytesToRead: Integer = 0);
+    procedure SerialStop(portID: TSerialPortID);
+    procedure SerialFlush(portID: TSerialPortID);
+    procedure SerialListen(portID: TSerialPortID);
+    class procedure AvailableSerialPorts(Ports: TStrings); static;
+    procedure SerialClose(portID: TSerialPortID);
+    procedure SerialHWConfig(portID: TSerialPortID; baudRate: LongWord);
+    procedure SerialSWConfig(portID: TSerialPortID; baudRate: LongWord;
+      rx_pin, tx_pin: Byte);
 
   protected
     { Protected declarations }
@@ -182,7 +192,7 @@ end;
 
 function TFirmata.GetFirmwareName: string;
 begin
-
+  result := FFirmwareName;
 end;
 
 procedure TFirmata.HandleRx(Sender: TObject; const Buffer; Count: Integer);
@@ -382,22 +392,22 @@ end;
 
 procedure TFirmata.SerialMessage;
 var
-  msg: string;
+  Msg: string;
   portID: Byte;
   idx: Integer;
   c: Word;
 begin
-  msg := '';
+  Msg := '';
   portID := Buffer.Data[1] and $0F;
   idx := 2;
   while idx < Buffer.Count do
   begin
     c := Buffer.Data[idx] or (Buffer.Data[idx + 1] shl 7);
-    msg := msg + char(c);
+    Msg := Msg + char(c);
     Inc(idx, 2);
   end;
   if Assigned(FOnSerialReceve) then
-    FOnSerialReceve(Self, portID, msg);
+    FOnSerialReceve(Self, portID, Msg);
 end;
 
 procedure TFirmata.SetAnalog(pin: Byte; const value: Word);
@@ -412,21 +422,21 @@ end;
 
 procedure TFirmata.SerialData;
 var
-  msg: string;
+  Msg: string;
   portID: Byte;
   idx: Integer;
   c: Word;
 begin
-  msg := '';
+  Msg := '';
   idx := 1;
   while idx < Buffer.Count do
   begin
     c := (Buffer.Data[idx] and $7F) or ((Buffer.Data[idx + 1] and $7F) shl 7);
-    msg := msg + char(c);
+    Msg := Msg + char(c);
     Inc(idx, 2);
   end;
   if Assigned(FOnSerialDataReceve) then
-    FOnSerialDataReceve(Self, msg);
+    FOnSerialDataReceve(Self, Msg);
 end;
 
 procedure TFirmata.ProcessEx;
@@ -578,7 +588,7 @@ end;
 
 function TFirmata.digitalRead(pin: Byte): TPinState;
 begin
-  result := PinsInfo[pin].value > 0;
+  result := TPinState(PinsInfo[pin].value);
 end;
 
 procedure TFirmata.digitalReport(Port: Byte; enab: Boolean);
@@ -630,6 +640,107 @@ begin
     Info.Add(idx.Tostring + ':' + pin.analog_channel.Tostring);
     Inc(idx);
   end;
+end;
+
+procedure TFirmata.SerialWrite(portID: TSerialPortID; Msg: String);
+var
+  slice: string;
+  maxLength: Integer;
+  Buf: array of Byte;
+  i: Integer;
+begin
+  maxLength := (MAX_DATA_BYTES - 5) div 2;
+  repeat
+    if (Msg.Length >= maxLength) then
+    begin
+      slice := Copy(Msg, 1, maxLength);
+      Delete(Msg, 1, maxLength);
+    end
+    else
+    begin
+      slice := Msg;
+      Msg := '';
+    end;
+
+    SetLength(Buf, Length(slice) * 2 + 2);
+    Buf[0] := SERIAL_MESSAGE;
+    Buf[1] := SERIAL_WRITE or Ord(portID);
+
+    for i := 1 to Length(slice) do
+    begin
+      Buf[(i * 2)] := Word(slice[i]) and $7F;
+      Buf[(i * 2) + 1] := (Word(slice[i]) shr 7) and $7F;
+    end;
+    Write(Buf);
+  until Msg.IsEmpty;
+end;
+
+procedure TFirmata.SerialRead(portID: TSerialPortID;
+  maxBytesToRead: Integer = 0);
+begin
+  if maxBytesToRead > 0 then
+    Write([SERIAL_MESSAGE, SERIAL_READ or Ord(portID), SERIAL_READ_MODE_CONT,
+      (maxBytesToRead and $7F), ((maxBytesToRead shr 7) and $7F)])
+  else
+    Write([SERIAL_MESSAGE, SERIAL_READ or Ord(portID), SERIAL_READ_MODE_CONT]);
+end;
+
+procedure TFirmata.SerialStop(portID: TSerialPortID);
+begin
+  Write([SERIAL_MESSAGE, SERIAL_READ or Ord(portID), SERIAL_READ_MODE_STOP]);
+end;
+
+procedure TFirmata.SerialFlush(portID: TSerialPortID);
+begin
+  Write([SERIAL_MESSAGE, SERIAL_FLUSH or Ord(portID)]);
+end;
+
+procedure TFirmata.SerialListen(portID: TSerialPortID);
+begin
+  if Ord(portID) < 8 then
+    exit; // listen only applies to software serial ports
+  Write([SERIAL_MESSAGE, SERIAL_LISTEN or Ord(portID)]);
+end;
+
+procedure TFirmata.SerialClose(portID: TSerialPortID);
+begin
+  Write([SERIAL_MESSAGE, SERIAL_CLOSE or Ord(portID)]);
+end;
+
+procedure TFirmata.SerialHWConfig(portID: TSerialPortID; baudRate: LongWord);
+var
+  baud: array [0 .. 2] of Byte;
+  i: Integer;
+begin
+  if Ord(portID) > 7 then
+    exit; // PortID > 7 are software serial
+
+  for i := 0 to 2 do
+    baud[i] := ((baudRate shr (i * 7)) and $7F);
+  Write([SERIAL_MESSAGE, SERIAL_CONFIG or Ord(portID), baud[0], baud[1],
+    baud[2]]);
+end;
+
+procedure TFirmata.SerialSWConfig(portID: TSerialPortID; baudRate: LongWord;
+  rx_pin: Byte; tx_pin: Byte);
+var
+  baud: array [0 .. 4] of Byte;
+  i: Integer;
+begin
+  if portID < 8 then
+    exit; // PortID < 8 are hardware serial
+
+  for i := 0 to 2 do
+    baud[i] := ((baudRate shr (i * 7)) and $7F);
+  baud[3] := rx_pin and $7F;
+  baud[4] := tx_pin and $7F;
+  Write([SERIAL_MESSAGE, SERIAL_CONFIG or Ord(portID), baud[0], baud[1],
+    baud[2], baud[3], baud[4]]);
+end;
+
+class procedure TFirmata.AvailableSerialPorts(Ports: TStrings);
+begin
+  EnumComPorts(Ports);
 end;
 
 end.

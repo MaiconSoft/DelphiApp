@@ -42,12 +42,19 @@ type
     Major, Minor: byte;
   end;
 
+  // all pin mode
   TPinMode = (pmInput = PIN_MODE_INPUT, pmOutput, pmAnalog, pmPWM, pmDevVo,
     pmShift, pmI2C, pmOneWire, pmStepper, pmEncoder, pmSerial, pmPullUp,
     pmIgnore = PIN_MODE_IGNORE);
 
   // pin digital state
   TPinState = (psLow = 0, psHigh = 1);
+
+  // Port ID for serial
+  TSerialPortID = (spHardware0 = 0, spHardware1, spHardware2, spHardware3,
+    spHardware4, spHardware5, spHardware6, spHardware7, spSoftware0,
+    spSoftware1, spSoftware2, spSoftware3, spSoftware4, spSoftware5,
+    spSoftware6, spSoftware7);
 
   TAnalogParse = record
     Cmd: byte;
