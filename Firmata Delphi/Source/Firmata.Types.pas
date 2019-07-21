@@ -78,6 +78,22 @@ type
     function Minor: byte;
   end;
 
+  TI2C_Mode = (imReadWrite, imReadOnce, imReadContinously, imStopReading);
+  TI2C_AddressMode = (iam7bits, iam10bits);
+
+  TI2C_RequestMode = record
+    Adress: Word;
+    autoRestart: Boolean;
+    mode: TI2C_Mode;
+    AddresMode: TI2C_AddressMode;
+  end;
+
+  TI2C_RequestParse = record
+    Lsb, Msb: byte;
+    procedure Pack(Req: TI2C_RequestMode);
+    function UpPack: TI2C_RequestMode;
+  end;
+
 implementation
 
 { TAnalogParse }
@@ -157,6 +173,25 @@ begin
     Result := Result + ParseChar(idx);
     Inc(idx, 2);
   end;
+end;
+
+{ TI2C_RequestParse }
+
+procedure TI2C_RequestParse.Pack(Req: TI2C_RequestMode);
+begin
+  Lsb := Req.Adress and $7F; // 7 bits  adress
+  Msb := (Req.Adress shr 7) and $07; // More 3 bits adress(10bits mode)
+  Msb := Msb or (ord(Req.mode) shl 3); // Read-write mode
+  Msb := Msb or (ord(Req.AddresMode) shl 5); // 10bits adress mode
+  Msb := Msb or (ord(Req.autoRestart) shl 6); // Auto Restart mode
+end;
+
+function TI2C_RequestParse.UpPack: TI2C_RequestMode;
+begin
+  Result.Adress := ((Msb and $07) shl 7) or Lsb;
+  Result.mode := TI2C_Mode((Msb shr 3) and $03);
+  Result.AddresMode := TI2C_AddressMode((Msb shr 5) and $01);
+  Result.autoRestart := (Msb shr 6) and $01 > 0;
 end;
 
 end.

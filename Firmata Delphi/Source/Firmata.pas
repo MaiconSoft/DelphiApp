@@ -33,6 +33,8 @@ type
     procedure AskFirmware;
     procedure Write(Buf: array of Byte;
       IncludeHeadAndTail: Boolean = True); overload;
+    procedure Write(Header, Buf: array of Byte;
+      IncludeHeadAndTail: Boolean = True); overload;
     procedure Write(Buf: Byte; IncludeHeadAndTail: Boolean = True); overload;
     procedure WriteHead;
     procedure WriteTail;
@@ -64,7 +66,7 @@ type
     function GetAnalog(pin: Byte): Word;
     procedure SetAnalog(pin: Byte; const value: Word);
     procedure PrintPinInfo(Info: TStrings);
-    procedure SerialWrite(portID: TSerialPortID; Msg: String);
+    procedure SerialWrite(portID: TSerialPortID; Msg: AnsiString);
     procedure SerialRead(portID: TSerialPortID; maxBytesToRead: Integer = 0);
     procedure SerialStop(portID: TSerialPortID);
     procedure SerialFlush(portID: TSerialPortID);
@@ -74,6 +76,12 @@ type
     procedure SerialHWConfig(portID: TSerialPortID; baudRate: LongWord);
     procedure SerialSWConfig(portID: TSerialPortID; baudRate: LongWord;
       rx_pin, tx_pin: Byte);
+    procedure I2cRequest(mode: TI2C_RequestMode; Data: array of Byte);
+    class procedure ExpandArray(DataIn: array of Byte;
+      var DataOut: array of Byte); static;
+    procedure I2cConfig(delay: uint16; Data: array of Byte);
+    class procedure ContractArray(DataIn: array of Byte;
+      var DataOut: array of Byte); static;
 
   protected
     { Protected declarations }
@@ -392,10 +400,10 @@ end;
 
 procedure TFirmata.SerialMessage;
 var
-  Msg: string;
+  Msg: AnsiString;
   portID: Byte;
   idx: Integer;
-  c: Word;
+  c: AnsiChar;
 begin
   Msg := '';
   portID := Buffer.Data[1] and $0F;
@@ -403,7 +411,7 @@ begin
   while idx < Buffer.Count do
   begin
     c := Buffer.Data[idx] or (Buffer.Data[idx + 1] shl 7);
-    Msg := Msg + char(c);
+    Msg := Msg + c;
     Inc(idx, 2);
   end;
   if Assigned(FOnSerialReceve) then
@@ -422,19 +430,20 @@ end;
 
 procedure TFirmata.SerialData;
 var
-  Msg: string;
+  Msg: AnsiString;
   portID: Byte;
   idx: Integer;
-  c: Word;
+  c: AnsiChar;
 begin
   Msg := '';
   idx := 1;
   while idx < Buffer.Count do
   begin
     c := (Buffer.Data[idx] and $7F) or ((Buffer.Data[idx + 1] and $7F) shl 7);
-    Msg := Msg + char(c);
+    Msg := Msg + c;
     Inc(idx, 2);
   end;
+
   if Assigned(FOnSerialDataReceve) then
     FOnSerialDataReceve(Self, Msg);
 end;
@@ -537,6 +546,17 @@ begin
   end;
 end;
 
+procedure TFirmata.Write(Header, Buf: array of Byte;
+  IncludeHeadAndTail: Boolean);
+begin
+  if IncludeHeadAndTail then
+    WriteHead;
+  Serial.Write(Header, Length(Header));
+  Serial.Write(Buf, Length(Buf));
+  if IncludeHeadAndTail then
+    WriteTail;
+end;
+
 procedure TFirmata.WriteHead;
 var
   b: Byte;
@@ -564,7 +584,6 @@ begin
 end;
 
 procedure TFirmata.Write(Buf: Byte; IncludeHeadAndTail: Boolean = True);
-
 begin
   if IncludeHeadAndTail then
     WriteHead;
@@ -642,16 +661,62 @@ begin
   end;
 end;
 
-procedure TFirmata.SerialWrite(portID: TSerialPortID; Msg: String);
+procedure TFirmata.I2cRequest(mode: TI2C_RequestMode; Data: array of Byte);
 var
-  slice: string;
+  Buf: array of Byte;
+  Parse: TI2C_RequestParse;
+  i: Integer;
+begin
+  Parse.Pack(mode);
+  SetLength(Buf, 2 * Length(Data));
+  ExpandArray(Data, Buf);
+  Write([I2C_REQUEST, Parse.Lsb, Parse.Msb], Buf);
+end;
+
+class procedure TFirmata.ExpandArray(DataIn: array of Byte;
+  var DataOut: array of Byte);
+var
+  i: Integer;
+begin
+  // SetLength(DataOut, Length(DataIn) * 2);
+  for i := 0 to High(DataIn) do
+  begin
+    DataOut[i * 2] := DataIn[i] and $7F;
+    DataOut[(i * 2) + 1] := (DataIn[i] shl 7) and $7F;
+  end;
+end;
+
+class procedure TFirmata.ContractArray(DataIn: array of Byte;
+  var DataOut: array of Byte);
+var
+  i: Integer;
+begin
+  // SetLength(DataOut, Length(DataIn) div 2);
+  for i := 0 to High(DataOut) do
+  begin
+    DataOut[i] := (DataIn[i * 2 + 1] shr 7) or (DataIn[i * 2] and $7F);
+  end;
+end;
+
+procedure TFirmata.I2cConfig(delay: uint16; Data: array of Byte);
+var
+  Buf: array of Byte;
+begin
+  SetLength(Buf, 2 * Length(Data));
+  ExpandArray(Data, Buf);
+  write([I2C_CONFIG, (delay and $7F), ((delay shr 7) and $7F)], Buf);
+end;
+
+procedure TFirmata.SerialWrite(portID: TSerialPortID; Msg: AnsiString);
+var
+  slice: AnsiString;
   maxLength: Integer;
   Buf: array of Byte;
   i: Integer;
 begin
   maxLength := (MAX_DATA_BYTES - 5) div 2;
   repeat
-    if (Msg.Length >= maxLength) then
+    if (Length(Msg) >= maxLength) then
     begin
       slice := Copy(Msg, 1, maxLength);
       Delete(Msg, 1, maxLength);
@@ -672,7 +737,7 @@ begin
       Buf[(i * 2) + 1] := (Word(slice[i]) shr 7) and $7F;
     end;
     Write(Buf);
-  until Msg.IsEmpty;
+  until Msg = '';
 end;
 
 procedure TFirmata.SerialRead(portID: TSerialPortID;
@@ -727,7 +792,7 @@ var
   baud: array [0 .. 4] of Byte;
   i: Integer;
 begin
-  if portID < 8 then
+  if Ord(portID) < 8 then
     exit; // PortID < 8 are hardware serial
 
   for i := 0 to 2 do
