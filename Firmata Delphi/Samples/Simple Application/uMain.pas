@@ -5,10 +5,11 @@ interface
 uses
   Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants,
   System.Classes, Vcl.Graphics,
-  Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Firmata;
+  Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Firmata, Vcl.ExtCtrls;
 
 type
   TForm1 = class(TForm)
+    tmr1: TTimer;
   private
     { Private declarations }
   public

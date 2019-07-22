@@ -10,9 +10,11 @@ interface
 
 uses
   System.SysUtils, System.Classes, Firmata.Constants, Firmata.Types, CPort,
-  System.Generics.Collections;
+  System.Generics.Collections, Vcl.ExtCtrls, Winapi.Windows, Vcl.Forms;
 
 type
+  TSerial = class;
+
   TFirmata = class(TComponent)
   private
     { Private declarations }
@@ -26,6 +28,8 @@ type
     FReady: Boolean;
     FOnSerialReceve: TNotifySerialEvent;
     FOnSerialDataReceve: TNotifySerialDataEvent;
+    FTimer: TTimer;
+    FSerials: array [TSerialPortID] of TSerial;
     function GetFirmwareName: string;
     function SettingsFileName: string;
     procedure Process(value: Byte);
@@ -82,7 +86,10 @@ type
     procedure I2cConfig(delay: uint16; Data: array of Byte);
     class procedure ContractArray(DataIn: array of Byte;
       var DataOut: array of Byte); static;
-
+    function GetPinMode(pin: Byte): TPinMode;
+    procedure AskUpdate(Sender: TObject);
+    function GetTimed: Boolean;
+    procedure SetTimed(const value: Boolean);
   protected
     { Protected declarations }
   public
@@ -97,13 +104,63 @@ type
     property Ready: Boolean read FReady;
     property Digital[pin: Byte]: TPinState read GetDigital write SetDigital;
     property Analog[pin: Byte]: Word read GetAnalog write SetAnalog;
+    property PinMode[pin: Byte]: TPinMode read GetPinMode write setPinMode;
+
   published
     { Published declarations }
-    property Serial: TComPort read FSerial;
+    property TimedUpdate: Boolean read GetTimed write SetTimed;
+    property SerialDriver: TComPort read FSerial;
     property OnSerialReceve: TNotifySerialEvent read FOnSerialReceve
       write FOnSerialReceve;
     property OnSerialDataReceve: TNotifySerialDataEvent read FOnSerialDataReceve
       write FOnSerialDataReceve;
+  end;
+
+  TLookAHead = (lhSkipAll, hlSkipNone, lhSkipWhiteSpace);
+
+  TSerial = class
+  private
+    FPortID: TSerialPortID;
+    FParent: TFirmata;
+    FBuffer: TSerialCircularBuffer;
+    FTimeout: Cardinal;
+    function TimedPeek: Byte;
+    function TimedRead: Byte;
+    function peekNextDigit(lookahead: TLookAHead; detectDecimal: Boolean): Byte;
+  public
+    constructor Create(AOwner: TFirmata; portID: TSerialPortID);
+    procedure Print(Msg: string);
+    procedure Println(Msg: string);
+    procedure Stop();
+    procedure Listen();
+    procedure Flush();
+    function read(): Byte;
+    function peek(): Byte;
+    function available: Byte;
+    function ParseInt(lookahead: TLookAHead; ignore: AnsiChar)
+      : Integer; overload;
+    function ParseInt(lookahead: TLookAHead; ignore: Byte): Integer; overload;
+    function ParseInt(lookahead: TLookAHead): Integer; overload;
+    function ParseInt(): Integer; overload;
+    function ParseFloat: Double; overload;
+    function ParseFloat(lookahead: TLookAHead): Double; overload;
+    function ParseFloat(lookahead: TLookAHead; ignore: Byte): Double; overload;
+    function ParseFloat(lookahead: TLookAHead; ignore: AnsiChar)
+      : Double; overload;
+    function ReadBytesUntil(terminator: AnsiChar; var Buffer: AnsiString;
+      Length: Integer): Integer; overload;
+    function ReadBytesUntil(terminator: Byte; var Buffer: array of Byte;
+      Length: Integer): Integer; overload;
+    function ReadBytes(var Buffer: AnsiString; Length: Integer)
+      : Integer; overload;
+    function ReadBytes(var Buffer: array of Byte; Length: Integer)
+      : Integer; overload;
+    function ReadString(terminator: AnsiChar): AnsiString; overload;
+    function ReadString(terminator: Byte): AnsiString; overload;
+    procedure baudRate(baud: LongWord); overload;
+    procedure baudRate(baud: LongWord; RxPin, TXPin: Byte); overload;
+    property portID: TSerialPortID read FPortID Write FPortID;
+    property Timeout: Cardinal read FTimeout write FTimeout;
   end;
 
 procedure Register;
@@ -145,7 +202,22 @@ begin
   write([REPORT_FIRMWARE]);
 end;
 
+procedure TFirmata.AskUpdate(Sender: TObject);
+var
+  i: Integer;
+begin
+  for i := 0 to 127 do
+  begin
+    AskReportDigital(i);
+    AskReportAnalog(i);
+  end;
+  for i := 0 to 15 do
+    SerialRead(TSerialPortID(i));
+end;
+
 constructor TFirmata.Create(AOwner: TComponent);
+var
+  i: TSerialPortID;
 begin
   inherited;
   Buffer.Clear;
@@ -162,25 +234,40 @@ begin
     LoadSettings(stIniFile, SettingsFileName);
     OnRxBuf := HandleRx;
   end;
+  FTimer := TTimer.Create(nil);
+  with FTimer do
+  begin
+    Enabled := false;
+    Interval := 500;
+    OnTimer := AskUpdate;
+  end;
+  for i := spHardware0 to High(FSerials) do
+    FSerials[i] := TSerial.Create(Self, i);
 end;
 
 destructor TFirmata.Destroy;
 var
   key: Word;
 begin
+  FTimer.Free;
   Stop;
-  Serial.free;
+  SerialDriver.Free;
   for key in I2CMemory.Keys do
   begin
-    I2CMemory[key].free;
+    I2CMemory[key].Free;
   end;
-  I2CMemory.free;
+  I2CMemory.Free;
   inherited;
 end;
 
 procedure TFirmata.SaveSettings;
 begin
-  Serial.StoreSettings(stIniFile, SettingsFileName);
+  SerialDriver.StoreSettings(stIniFile, SettingsFileName);
+end;
+
+procedure TFirmata.SetTimed(const value: Boolean);
+begin
+  FTimer.Enabled := value;
 end;
 
 function TFirmata.SettingsFileName: string;
@@ -203,13 +290,23 @@ begin
   result := FFirmwareName;
 end;
 
+function TFirmata.GetPinMode(pin: Byte): TPinMode;
+begin
+  result := TPinMode(PinsInfo[pin].mode);
+end;
+
+function TFirmata.GetTimed: Boolean;
+begin
+  result := FTimer.Enabled;
+end;
+
 procedure TFirmata.HandleRx(Sender: TObject; const Buffer; Count: Integer);
 var
   Buf: Byte;
 begin
-  while Serial.InputCount > 0 do
+  while SerialDriver.InputCount > 0 do
   begin
-    Serial.read(Buf, 1);
+    SerialDriver.read(Buf, 1);
     Process(Buf);
   end;
 end;
@@ -243,7 +340,7 @@ var
   channel: Byte;
   value, i: Integer;
 begin
-  Serial.read(Parse.Buffer, 2);
+  SerialDriver.read(Parse.Buffer, 2);
   Parse.Cmd := Cmd;
   channel := Parse.channel;
   value := Parse.value;
@@ -264,7 +361,7 @@ var
   value: Integer;
   i: Integer;
 begin
-  Serial.read(Parse.Buffer, 2);
+  SerialDriver.read(Parse.Buffer, 2);
   Parse.Cmd := Cmd;
   portNum := Parse.Number;
   Parse.ExtractBits;
@@ -283,7 +380,7 @@ procedure TFirmata.ReadVersion;
 var
   Parse: TVersionParse;
 begin
-  Serial.read(Parse.Buffer, 2);
+  SerialDriver.read(Parse.Buffer, 2);
   with Version do
   begin
     Major := Parse.Major;
@@ -410,9 +507,10 @@ begin
   idx := 2;
   while idx < Buffer.Count do
   begin
-    c := Buffer.Data[idx] or (Buffer.Data[idx + 1] shl 7);
+    c := AnsiChar(Buffer.Data[idx] or (Buffer.Data[idx + 1] shl 7));
     Msg := Msg + c;
     Inc(idx, 2);
+    FSerials[TSerialPortID(portID)].FBuffer.Write(Ord(c));
   end;
   if Assigned(FOnSerialReceve) then
     FOnSerialReceve(Self, portID, Msg);
@@ -439,7 +537,8 @@ begin
   idx := 1;
   while idx < Buffer.Count do
   begin
-    c := (Buffer.Data[idx] and $7F) or ((Buffer.Data[idx + 1] and $7F) shl 7);
+    c := AnsiChar((Buffer.Data[idx] and $7F) or
+      ((Buffer.Data[idx + 1] and $7F) shl 7));
     Msg := Msg + c;
     Inc(idx, 2);
   end;
@@ -522,7 +621,7 @@ function TFirmata.Start: Boolean;
 begin
   result := True;
   try
-    Serial.Open();
+    SerialDriver.Open();
   except
     result := false;
   end;
@@ -530,17 +629,17 @@ end;
 
 function TFirmata.Start(Port: string): Boolean;
 begin
-  Serial.Port := Port;
+  SerialDriver.Port := Port;
   result := Start;
 end;
 
 function TFirmata.Stop: Boolean;
 begin
   result := True;
-  if not Serial.Connected then
+  if not SerialDriver.Connected then
     exit;
   try
-    Serial.Close();
+    SerialDriver.Close();
   except
     result := false;
   end;
@@ -551,8 +650,8 @@ procedure TFirmata.Write(Header, Buf: array of Byte;
 begin
   if IncludeHeadAndTail then
     WriteHead;
-  Serial.Write(Header, Length(Header));
-  Serial.Write(Buf, Length(Buf));
+  SerialDriver.Write(Header, Length(Header));
+  SerialDriver.Write(Buf, Length(Buf));
   if IncludeHeadAndTail then
     WriteTail;
 end;
@@ -562,7 +661,7 @@ var
   b: Byte;
 begin
   b := START_SYSEX;
-  Serial.Write(b, 1);
+  SerialDriver.Write(b, 1);
 end;
 
 procedure TFirmata.WriteTail;
@@ -570,7 +669,7 @@ var
   b: Byte;
 begin
   b := END_SYSEX;
-  Serial.Write(b, 1);
+  SerialDriver.Write(b, 1);
 end;
 
 procedure TFirmata.Write(Buf: array of Byte; IncludeHeadAndTail: Boolean);
@@ -578,7 +677,7 @@ procedure TFirmata.Write(Buf: array of Byte; IncludeHeadAndTail: Boolean);
 begin
   if IncludeHeadAndTail then
     WriteHead;
-  Serial.Write(Buf, Length(Buf));
+  SerialDriver.Write(Buf, Length(Buf));
   if IncludeHeadAndTail then
     WriteTail;
 end;
@@ -587,7 +686,7 @@ procedure TFirmata.Write(Buf: Byte; IncludeHeadAndTail: Boolean = True);
 begin
   if IncludeHeadAndTail then
     WriteHead;
-  Serial.Write(Buf, 1);
+  SerialDriver.Write(Buf, 1);
   if IncludeHeadAndTail then
     WriteTail;
 end;
@@ -763,7 +862,8 @@ end;
 procedure TFirmata.SerialListen(portID: TSerialPortID);
 begin
   if Ord(portID) < 8 then
-    exit; // listen only applies to software serial ports
+    exit;
+  // listen only applies to software serial ports
   Write([SERIAL_MESSAGE, SERIAL_LISTEN or Ord(portID)]);
 end;
 
@@ -806,6 +906,292 @@ end;
 class procedure TFirmata.AvailableSerialPorts(Ports: TStrings);
 begin
   EnumComPorts(Ports);
+end;
+
+{ TSerial }
+
+procedure TSerial.baudRate(baud: LongWord);
+begin
+  if Ord(FPortID) > 7 then
+    raise Exception.Create('RX and TX pins must to be expecify for softSerial');
+  FParent.SerialHWConfig(FPortID, baud);
+end;
+
+function TSerial.available: Byte;
+begin
+  result := FBuffer.available;
+end;
+
+procedure TSerial.baudRate(baud: LongWord; RxPin, TXPin: Byte);
+begin
+  if Ord(FPortID) > 7 then
+    FParent.SerialSWConfig(FPortID, baud, RxPin, TXPin)
+  else
+    FParent.SerialHWConfig(FPortID, baud);
+end;
+
+constructor TSerial.Create(AOwner: TFirmata; portID: TSerialPortID);
+begin
+  FTimeout := 1000;
+  FBuffer.Initialize;
+  FParent := AOwner;
+  FPortID := portID;
+end;
+
+procedure TSerial.Flush;
+begin
+  FParent.SerialFlush(FPortID);
+end;
+
+procedure TSerial.Listen;
+begin
+  FParent.SerialListen(FPortID);
+end;
+
+function TSerial.ParseFloat: Double;
+begin
+  result := ParseFloat(lhSkipAll, 0);
+end;
+
+function TSerial.ParseInt(lookahead: TLookAHead; ignore: AnsiChar): Integer;
+begin
+  result := ParseInt(lookahead, Ord(ignore));
+end;
+
+function TSerial.peekNextDigit(lookahead: TLookAHead;
+  detectDecimal: Boolean): Byte;
+var
+  c: Byte;
+begin
+  result := $FF;
+  while True do
+  begin
+    c := TimedPeek;
+    if (c = $FF) or ((c >= $30) and (c <= $39)) or (detectDecimal and (c = $46))
+    then
+      exit(c);
+    case lookahead of
+      lhSkipAll:
+        ;
+      hlSkipNone:
+        exit($FF);
+      lhSkipWhiteSpace:
+        case c of
+          $09, $32, $10, $13:
+            ;
+        else
+          exit($FF);
+        end;
+    end;
+    read;
+  end;
+end;
+
+function TSerial.TimedPeek(): Byte;
+var
+  Start: Cardinal;
+  c: Byte;
+begin
+  result := $FF;
+  Start := GetTickCount;
+  repeat
+    c := peek;
+    if c <> $FF then
+      exit(c);
+  until ((GetTickCount - Start) >= FTimeout);
+end;
+
+function TSerial.TimedRead: Byte;
+var
+  Start: Cardinal;
+  c: Byte;
+begin
+  result := $FF;
+  Start := GetTickCount;
+  repeat
+    c := read;
+    if c <> $FF then
+      exit(c);
+  until ((GetTickCount - Start) >= FTimeout);
+end;
+
+function TSerial.ParseInt(lookahead: TLookAHead; ignore: Byte): Integer;
+var
+  isNegative: Boolean;
+  c: Byte;
+begin
+  isNegative := false;
+  result := 0;
+  c := peekNextDigit(lookahead, false);
+  if c = $FF then
+    exit(0); // Timeout event
+
+  repeat
+    if c <> ignore then
+      case c of
+        $95: // '-'
+          isNegative := True;
+        $30 .. $39: // '0'..'9'
+          result := result * 10 + (c - $30);
+      end;
+    read;
+    c := TimedPeek;
+  until (not(c in [$30 .. $39]) and (c <> ignore));
+  if isNegative then
+    result := -result;
+end;
+
+function TSerial.ParseInt(lookahead: TLookAHead): Integer;
+begin
+  result := ParseInt(lookahead, 0);
+end;
+
+function TSerial.ParseFloat(lookahead: TLookAHead): Double;
+begin
+  result := ParseFloat(lookahead, 0);
+end;
+
+function TSerial.ParseFloat(lookahead: TLookAHead; ignore: Byte): Double;
+var
+  isNegative, isFraction: Boolean;
+  c: Byte;
+  fraction: Double;
+begin
+  isNegative := false;
+  isFraction := false;
+  fraction := 1.0;
+  result := 0.0;
+  c := peekNextDigit(lookahead, True);
+  if c = $FF then
+    exit(0.0); // Timeout event
+
+  repeat
+    if c <> ignore then
+      case c of
+        $95: // '-'
+          isNegative := True;
+        $46:
+          isFraction := True;
+        $30 .. $39: // '0'..'9'
+          begin
+            result := result * 10 + (c - $30);
+            if isFraction then
+              fraction := fraction * 0.1;
+          end;
+      end;
+    read;
+    c := TimedPeek;
+  until (not(c in [$30 .. $39]) and (c <> ignore)) or
+    ((c = $46) and isFraction);
+  if isNegative then
+    result := -result;
+  if isFraction then
+    result := result * fraction;
+end;
+
+function TSerial.ParseFloat(lookahead: TLookAHead; ignore: AnsiChar): Double;
+begin
+  result := ParseFloat(lookahead, Ord(ignore));
+end;
+
+function TSerial.ParseInt: Integer;
+begin
+  result := ParseInt(lhSkipAll, 0);
+end;
+
+function TSerial.peek: Byte;
+begin
+  result := FBuffer.peek;
+end;
+
+procedure TSerial.Print(Msg: string);
+begin
+  FParent.SerialWrite(FPortID, Msg);
+end;
+
+procedure TSerial.Println(Msg: string);
+begin
+  Print(Msg + #13);
+end;
+
+function TSerial.read: Byte;
+begin
+  result := FBuffer.read;
+end;
+
+function TSerial.ReadBytes(var Buffer: AnsiString; Length: Integer): Integer;
+var
+  Buf: array of Byte;
+begin
+  SetLength(Buf, Length);
+  result := ReadBytes(Buf, Length);
+  SetString(Buffer, PAnsiChar(@Buf[0]), result);
+end;
+
+function TSerial.ReadBytes(var Buffer: array of Byte; Length: Integer): Integer;
+var
+  c: Byte;
+begin
+  result := 0;
+  while result < Length do
+  begin
+    c := TimedRead;
+    if (c = $FF) then
+      Break;
+    Buffer[result] := c;
+    result := result + 1;
+  end;
+end;
+
+function TSerial.ReadBytesUntil(terminator: AnsiChar; var Buffer: AnsiString;
+  Length: Integer): Integer;
+var
+  Buf: array of Byte;
+begin
+  SetLength(Buf, Length);
+  result := ReadBytesUntil(Ord(terminator), Buf, Length);
+  SetString(Buffer, PAnsiChar(@Buf[0]), result);
+end;
+
+function TSerial.ReadBytesUntil(terminator: Byte; var Buffer: array of Byte;
+  Length: Integer): Integer;
+var
+  value: Byte;
+begin
+  result := 0;
+  if Length < 0 then
+    exit;
+  while result < Length do
+  begin
+    value := TimedRead;
+    if (value = $FF) or (value = terminator) then
+      Break;
+    Buffer[result] := value;
+    result := result + 1;
+  end;
+end;
+
+function TSerial.ReadString(terminator: Byte): AnsiString;
+var
+  c: Byte;
+begin
+  result := '';
+  c := TimedRead;
+  while c <> $FF do
+  begin
+    result := result + AnsiChar(c);
+    c := TimedRead;
+  end;
+end;
+
+function TSerial.ReadString(terminator: AnsiChar): AnsiString;
+begin
+  result := ReadString(Ord(terminator));
+end;
+
+procedure TSerial.Stop;
+begin
+  FParent.SerialStop(FPortID);
 end;
 
 end.

@@ -4,6 +4,9 @@ interface
 
 uses Firmata.Constants, System.Generics.Collections;
 
+const
+  MAX_BUFFER_SIZE = 64;
+
 type
   TI2C_Register = TDictionary<Word, Word>;
   TI2C_memory = TDictionary<Word, TI2C_Register>;
@@ -92,6 +95,20 @@ type
     Lsb, Msb: byte;
     procedure Pack(Req: TI2C_RequestMode);
     function UpPack: TI2C_RequestMode;
+  end;
+
+  TSerialCircularBuffer = record
+  private
+    Buffer: array [0 .. (MAX_BUFFER_SIZE - 1)] of byte;
+    Head, Tail: byte;
+    procedure Inc(var variable: byte);
+  public
+    procedure Initialize;
+    procedure Flush;
+    function Available: byte;
+    function Read: byte;
+    function Peek: byte;
+    function Write(Data: byte): Boolean;
   end;
 
 implementation
@@ -192,6 +209,56 @@ begin
   Result.mode := TI2C_Mode((Msb shr 3) and $03);
   Result.AddresMode := TI2C_AddressMode((Msb shr 5) and $01);
   Result.autoRestart := (Msb shr 6) and $01 > 0;
+end;
+
+{ TSerialCircularBuffer }
+
+function TSerialCircularBuffer.Available: byte;
+begin
+  Result := ((MAX_BUFFER_SIZE + Head) - Tail) mod MAX_BUFFER_SIZE;
+end;
+
+procedure TSerialCircularBuffer.Flush;
+begin
+  Head := 0;
+  Tail := 0;
+end;
+
+procedure TSerialCircularBuffer.Inc(var variable: byte);
+begin
+  variable := (variable + 1) mod MAX_BUFFER_SIZE;
+end;
+
+procedure TSerialCircularBuffer.Initialize;
+begin
+  Flush;
+end;
+
+function TSerialCircularBuffer.Peek: byte;
+begin
+  if Head = Tail then
+    Result := $FF // Default error read 0xFF (255)
+  else
+    Result := Buffer[Tail];
+end;
+
+function TSerialCircularBuffer.Read: byte;
+begin
+  if Head <> Tail then
+  begin
+    Result := Buffer[Tail];
+    Inc(Tail);
+  end
+  else
+    Result := $FF; // Default error read 0xFF (255)
+end;
+
+function TSerialCircularBuffer.Write(Data: byte): Boolean;
+begin
+  if Available = MAX_BUFFER_SIZE - 1 then
+    Exit(False); // overflow
+  Buffer[Head] := Data;
+  Inc(Head);
 end;
 
 end.

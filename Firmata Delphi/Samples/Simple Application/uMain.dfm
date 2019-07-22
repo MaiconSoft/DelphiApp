@@ -13,4 +13,8 @@ object Form1: TForm1
   OldCreateOrder = False
   PixelsPerInch = 96
   TextHeight = 13
+  object tmr1: TTimer
+    Left = 448
+    Top = 72
+  end
 end
