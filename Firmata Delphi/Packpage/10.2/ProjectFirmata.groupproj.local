@@ -1,7 +1,9 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <BorlandProject>
-  <Transactions/>
+  <Transactions>
+    <Transaction>2019/07/19 18:26:56.165,D:\Programação\Git\Firmata Delphi\Packpage\10.2\ProjectFirmata.groupproj=D:\Programação\Local\Delphi\Fontes\ProjectGroup1.groupproj</Transaction>
+  </Transactions>
   <Default.Personality>
-    <Projects ActiveProject="D:\Programação\Git\Firmata Delphi\Packpage\10.2\FirmataPack.dproj"/>
+    <Projects ActiveProject="D:\Programação\Git\Firmata Delphi\Samples\Simple Application\SimpleApplication.dproj"/>
   </Default.Personality>
 </BorlandProject>

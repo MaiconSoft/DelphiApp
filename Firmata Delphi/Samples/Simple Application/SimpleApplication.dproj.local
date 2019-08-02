@@ -2,9 +2,11 @@
 <BorlandProject>
 	<Transactions>
     <Transaction>2019/07/19 18:04:16.000.806,=D:\Programação\Local\Delphi\Fontes\Unit1.pas</Transaction>
-    <Transaction>2019/07/19 18:06:29.000.884,D:\Programação\Git\Firmata Delphi\Samples\Simple Application\uMain.pas=D:\Programação\Local\Delphi\Fontes\Unit1.pas</Transaction>
-    <Transaction>2019/07/19 18:06:29.000.884,D:\Programação\Git\Firmata Delphi\Samples\Simple Application\uMain.dfm=D:\Programação\Local\Delphi\Fontes\Unit1.dfm</Transaction>
-    <Transaction>2019/07/19 18:06:39.000.338,D:\Programação\Git\Firmata Delphi\Samples\Simple Application\SimpleApplication.dproj=D:\Programação\Local\Delphi\Fontes\Project1.dproj</Transaction>
-    <Transaction>2019/07/19 19:01:06.839,=D:\Programação\Git\Firmata Delphi\Source\Firmata.pas</Transaction>
+    <Transaction>2019/07/19 18:06:29.000.884,D:\Programação\Local\Delphi\Fontes\Unit1.pas=D:\Programação\Git\Firmata Delphi\Samples\Simple Application\uMain.pas</Transaction>
+    <Transaction>2019/07/19 18:06:29.000.884,D:\Programação\Local\Delphi\Fontes\Unit1.dfm=D:\Programação\Git\Firmata Delphi\Samples\Simple Application\uMain.dfm</Transaction>
+    <Transaction>2019/07/19 18:06:39.000.338,D:\Programação\Local\Delphi\Fontes\Project1.dproj=D:\Programação\Git\Firmata Delphi\Samples\Simple Application\SimpleApplication.dproj</Transaction>
+    <Transaction>2019/07/19 19:01:06.000.839,=D:\Programação\Git\Firmata Delphi\Source\Firmata.pas</Transaction>
+    <Transaction>2019/07/22 19:24:44.000.446,=D:\Programação\Git\Firmata Delphi\Samples\Simple Application\Unit1.pas</Transaction>
+    <Transaction>2019/07/22 19:25:33.000.781,D:\Programação\Git\Firmata Delphi\Samples\Simple Application\Unit1.pas=D:\Programação\Git\Firmata Delphi\Source\Firmata.Print.pas</Transaction>
   </Transactions>
 </BorlandProject>
