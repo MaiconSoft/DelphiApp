@@ -8,3 +8,8 @@ FirmataPascal/
 *.identcache
 *.dcu
 *.exe
+Firmata Delphi/Samples/Simple Application/Win32/Debug/SimpleApplication.exe
+*.local
+*.stat
+*.dcu
+*.log

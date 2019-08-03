@@ -2,7 +2,7 @@ package FirmataPack;
 
 {$R *.res}
 {$R *.dres}
-{$IFDEF IMPLICITBUILDING This IFDEF should not be used by users}
+{.$IFDEF IMPLICITBUILDING This IFDEF should not be used by users}
 {$ALIGN 8}
 {$ASSERTIONS ON}
 {$BOOLEVAL OFF}
@@ -25,11 +25,13 @@ package FirmataPack;
 {$MINENUMSIZE 1}
 {$IMAGEBASE $400000}
 {$DEFINE DEBUG}
-{$ENDIF IMPLICITBUILDING}
+{.$ENDIF IMPLICITBUILDING}
 {$IMPLICITBUILD ON}
 
 requires
-  rtl;
+  rtl,
+  vcl,
+  CPort_R;
 
 contains
   Firmata in '..\..\Source\Firmata.pas',

@@ -10,7 +10,8 @@ interface
 
 uses
   System.SysUtils, System.Classes, Firmata.Constants, Firmata.Types, CPort,
-  System.Generics.Collections, Vcl.ExtCtrls, Winapi.Windows, Vcl.Forms;
+  System.Generics.Collections, Vcl.ExtCtrls, Winapi.Windows, Vcl.Forms,
+  LogUtils;
 
 type
   TSerial = class;
@@ -19,6 +20,7 @@ type
   private
     { Private declarations }
     FSerial: TComPort;
+    FAnalogs: TAnalogPinsSet;
     I2CMemory: TI2C_memory;
     FFirmwareName: string;
     AnalogPins: TAnalogPins;
@@ -30,11 +32,14 @@ type
     FOnSerialDataReceve: TNotifySerialDataEvent;
     FTimer: TTimer;
     FSerials: array [TSerialPortID] of TSerial;
+    FOnDigitalChange: TDigitalChangeNotify;
+    FOnAnalogChange: TAnalogChangeNotify;
     function GetFirmwareName: string;
     function SettingsFileName: string;
     procedure Process(value: Byte);
-    procedure HandleRx(Sender: TObject; const Buffer; Count: Integer);
-    procedure AskFirmware;
+    function WaitForBytes(const count: Integer;
+      Timeout: Cardinal = 1000): Boolean;
+    procedure HandleRx(Sender: TObject; count: Integer);
     procedure Write(Buf: array of Byte;
       IncludeHeadAndTail: Boolean = True); overload;
     procedure Write(Header, Buf: array of Byte;
@@ -56,7 +61,6 @@ type
     procedure SerialData;
     procedure AskBoardCapabilities;
     procedure AskReportAnalog(index: Integer);
-    procedure AskReportDigital(index: Integer);
     function digitalRead(pin: Byte): TPinState;
     function analogRead(pin: Byte): Word;
     function ReturnAnalogPinNumber(pin: Byte): Byte;
@@ -90,10 +94,13 @@ type
     procedure AskUpdate(Sender: TObject);
     function GetTimed: Boolean;
     procedure SetTimed(const value: Boolean);
+    procedure DoDigitalChange(pin: Integer);
+    procedure DoAnalogChange(Number: Integer; value: Word);
   protected
     { Protected declarations }
   public
     { Public declarations }
+    procedure AskFirmware;
     constructor Create(AOwner: TComponent); override;
     Destructor Destroy; override;
     function Start: Boolean; overload;
@@ -105,7 +112,6 @@ type
     property Digital[pin: Byte]: TPinState read GetDigital write SetDigital;
     property Analog[pin: Byte]: Word read GetAnalog write SetAnalog;
     property PinMode[pin: Byte]: TPinMode read GetPinMode write setPinMode;
-
   published
     { Published declarations }
     property TimedUpdate: Boolean read GetTimed write SetTimed;
@@ -114,6 +120,11 @@ type
       write FOnSerialReceve;
     property OnSerialDataReceve: TNotifySerialDataEvent read FOnSerialDataReceve
       write FOnSerialDataReceve;
+    property OnDigitalChange: TDigitalChangeNotify read FOnDigitalChange
+      write FOnDigitalChange;
+    property Analogs: TAnalogPinsSet read FAnalogs write FAnalogs;
+    property OnAnalogChange: TAnalogChangeNotify read FOnAnalogChange
+      write FOnAnalogChange;
   end;
 
   TLookAHead = (lhSkipAll, hlSkipNone, lhSkipWhiteSpace);
@@ -179,21 +190,17 @@ begin
   Write(REPORT_ANALOG or index);
 end;
 
-procedure TFirmata.AskReportDigital(index: Integer);
-begin
-  Write(REPORT_DIGITAL or index);
-end;
-
 procedure TFirmata.AskBoardCapabilities();
 var
   i: Integer;
 begin
+  SavLog('call AskBoardCapabilities');
   write([ANALOG_MAPPING_QUERY]);
   write([CAPABILITY_QUERY]);
   for i := 0 to 15 do
   begin
-    AskReportAnalog(i);
-    AskReportDigital(i);
+    digitalReport(i, True);
+    analogReport(i, True);
   end;
 end;
 
@@ -206,10 +213,12 @@ procedure TFirmata.AskUpdate(Sender: TObject);
 var
   i: Integer;
 begin
+  if not SerialDriver.Connected then
+    Exit;
   for i := 0 to 127 do
   begin
-    AskReportDigital(i);
-    AskReportAnalog(i);
+    digitalReport(i, True);
+    analogReport(i, True);
   end;
   for i := 0 to 15 do
     SerialRead(TSerialPortID(i));
@@ -220,6 +229,7 @@ var
   i: TSerialPortID;
 begin
   inherited;
+  FAnalogs := [];
   Buffer.Clear;
   Buffer.IsOpended := false;
   FReady := false;
@@ -227,12 +237,14 @@ begin
   I2CMemory := TI2C_memory.Create();
   with FSerial do
   begin
+    baudRate := br57600;
     DataBits := dbEight;
     Parity.Bits := prNone;
     StopBits := sbOneStopBit;
     FlowControl.FlowControl := fcNone;
     LoadSettings(stIniFile, SettingsFileName);
-    OnRxBuf := HandleRx;
+    TriggersOnRxChar := True;
+    OnRxChar := HandleRx;
   end;
   FTimer := TTimer.Create(nil);
   with FTimer do
@@ -300,10 +312,14 @@ begin
   result := FTimer.Enabled;
 end;
 
-procedure TFirmata.HandleRx(Sender: TObject; const Buffer; Count: Integer);
+procedure TFirmata.HandleRx(Sender: TObject; count: Integer);
 var
   Buf: Byte;
+  i: Integer;
 begin
+  // SetLength(Buf, 1);
+  // Move(Buffer, Buf[0], 1);
+
   while SerialDriver.InputCount > 0 do
   begin
     SerialDriver.read(Buf, 1);
@@ -340,15 +356,26 @@ var
   channel: Byte;
   value, i: Integer;
 begin
+  WaitForBytes(2);
   SerialDriver.read(Parse.Buffer, 2);
   Parse.Cmd := Cmd;
   channel := Parse.channel;
   value := Parse.value;
+  SavLog('analog channel ' + channel.ToString);
+  SavLog('analog value ' + value.ToString);
+
   for i := 0 to High(PinsInfo) do
   begin
     if PinsInfo[i].analog_channel = channel then
     begin
-      PinsInfo[i].value := value;
+      SavLog('analog to pin ' + i.ToString);
+      if PinsInfo[i].value <> value then
+      begin
+        PinsInfo[i].value := value;
+
+        if TAnalogPinsEnum(channel) in Analogs then
+          DoAnalogChange(channel, value);
+      end;
       Break;
     end;
   end;
@@ -360,18 +387,29 @@ var
   portNum, offset: Byte;
   value: Integer;
   i: Integer;
+  Buffer: array [0 .. 1] of Byte;
 begin
+  WaitForBytes(2);
   SerialDriver.read(Parse.Buffer, 2);
   Parse.Cmd := Cmd;
   portNum := Parse.Number;
+  SavLog('portNum = ' + portNum.ToString);
   Parse.ExtractBits;
   offset := 8 * portNum;
+
   for i := 0 to 7 do
   begin
     with PinsInfo[offset + i] do
     begin
       if (mode = PIN_MODE_INPUT) or (mode = PIN_MODE_PULLUP) then
-        value := Parse.Bit[i];
+      begin
+        if value <> Parse.Bit[i] then
+        begin
+          value := Parse.Bit[i];
+          DoDigitalChange(i);
+          SavLog('value[' + (offset + i).ToString + '] ' + value.ToString);
+        end;
+      end;
     end;
   end;
 end;
@@ -380,6 +418,8 @@ procedure TFirmata.ReadVersion;
 var
   Parse: TVersionParse;
 begin
+  SavLog('Version report');
+  WaitForBytes(2);
   SerialDriver.read(Parse.Buffer, 2);
   with Version do
   begin
@@ -394,7 +434,7 @@ var
 begin
   Major := Buffer.Data[1];
   Minor := Buffer.Data[2];
-  FFirmwareName := Format('%s - %d.%d', [Buffer.Tostring(3), Major, Minor]);
+  FFirmwareName := Format('%s - %d.%d', [Buffer.ToString(3), Major, Minor]);
 end;
 
 procedure TFirmata.CapabilityResponse;
@@ -412,7 +452,7 @@ begin
     PinsInfo[pin].supported_modes := 0;
   end;
 
-  while idx < Buffer.Count do
+  while idx < Buffer.count do
   begin
     if (Buffer.Data[idx] = CAPABILITY_PIN_SEPARATOR) then
     begin
@@ -442,12 +482,15 @@ var
   value, i, aPin: Byte;
 begin
   aPin := 0;
-  for i := 0 to Buffer.Count - 2 do
+  for i := 0 to Buffer.count - 2 do
   begin
     value := Buffer.Data[i + 1];
     PinsInfo[i].analog_channel := value;
     if value <> ANALOG_CHANNEL_NONE then
     begin
+      SavLog('mapping analog pin: ' + aPin.ToString);
+      SavLog('mapping analog index: ' + i.ToString);
+      SavLog('mapping analog value: ' + value.ToString);
       AnalogPins[aPin] := i;
       Inc(aPin);
     end;
@@ -458,16 +501,17 @@ procedure TFirmata.PinStateResponse;
 var
   pin, i: Byte;
 begin
-  if Buffer.Count < 4 then
-    exit;
+  SavLog('pin response');
+  if Buffer.count < 4 then
+    Exit;
 
   pin := Buffer.Data[1];
   PinsInfo[pin].mode := Buffer.Data[2];
   PinsInfo[pin].value := Buffer.Data[3];
 
-  if (Buffer.Count > 4) then
+  if (Buffer.count > 4) then
   begin
-    for i := 1 to Buffer.Count - 3 do
+    for i := 1 to Buffer.count - 3 do
       PinsInfo[pin].value := (PinsInfo[pin].value) or
         (Buffer.Data[3 + i] shl (7 * i));
   end;
@@ -483,7 +527,7 @@ begin
   if not I2CMemory.ContainsKey(sAddres) then
     I2CMemory.Add(sAddres, TI2C_Register.Create());
 
-  while idx < Buffer.Count do
+  while idx < Buffer.count do
   begin
     reg := Buffer.Data[idx] or (Buffer.Data[idx + 1] shl 7);
     Data := Buffer.Data[idx + 2] or (Buffer.Data[idx + 3] shl 7);
@@ -505,7 +549,7 @@ begin
   Msg := '';
   portID := Buffer.Data[1] and $0F;
   idx := 2;
-  while idx < Buffer.Count do
+  while idx < Buffer.count do
   begin
     c := AnsiChar(Buffer.Data[idx] or (Buffer.Data[idx + 1] shl 7));
     Msg := Msg + c;
@@ -535,7 +579,7 @@ var
 begin
   Msg := '';
   idx := 1;
-  while idx < Buffer.Count do
+  while idx < Buffer.count do
   begin
     c := AnsiChar((Buffer.Data[idx] and $7F) or
       ((Buffer.Data[idx + 1] and $7F) shl 7));
@@ -549,6 +593,7 @@ end;
 
 procedure TFirmata.ProcessEx;
 begin
+  SavLog('ProcessEx: 0x' + Buffer.Data[0].ToHexString);
   case Buffer.Data[0] of
     REPORT_FIRMWARE:
       begin
@@ -576,6 +621,9 @@ procedure TFirmata.Process(value: Byte);
 var
   Cmd: Byte;
 begin
+  if value > $7F then
+    SavLog('-------');
+  SavLog('RECEVE 0x' + value.ToHexString);
   if Buffer.IsOpended then
   begin
     if value = END_SYSEX then
@@ -594,17 +642,17 @@ begin
       ANALOG_MESSAGE:
         begin
           ReadAnalog(value);
-          exit;
+          Exit;
         end;
       DIGITAL_MESSAGE:
         begin
           ReadDigital(value);
-          exit;
+          Exit;
         end;
       REPORT_VERSION:
         begin
           ReadVersion;
-          exit;
+          Exit;
         end;
     end;
 
@@ -637,7 +685,7 @@ function TFirmata.Stop: Boolean;
 begin
   result := True;
   if not SerialDriver.Connected then
-    exit;
+    Exit;
   try
     SerialDriver.Close();
   except
@@ -682,6 +730,24 @@ begin
     WriteTail;
 end;
 
+function TFirmata.WaitForBytes(const count: Integer;
+  Timeout: Cardinal = 1000): Boolean;
+var
+  startTime: Cardinal;
+begin
+  if not SerialDriver.Connected then
+    Exit(false);
+
+  startTime := GetTickCount;
+  while SerialDriver.InputCount < count do
+  begin
+    Application.ProcessMessages;
+    if (GetTickCount - startTime) > Timeout then
+      Exit(false);
+  end;
+  result := True;
+end;
+
 procedure TFirmata.Write(Buf: Byte; IncludeHeadAndTail: Boolean = True);
 begin
   if IncludeHeadAndTail then
@@ -704,6 +770,18 @@ begin
   PinsInfo[pin].value := Ord(value);
 end;
 
+procedure TFirmata.DoAnalogChange(Number: Integer; value: Word);
+begin
+  if Assigned(OnAnalogChange) then
+    OnAnalogChange(Self, TAnalogPinsEnum(Number), value);
+end;
+
+procedure TFirmata.DoDigitalChange(pin: Integer);
+begin
+  if Assigned(FOnDigitalChange) then
+    FOnDigitalChange(Self, pin, TPinState(PinsInfo[pin].value));
+end;
+
 function TFirmata.digitalRead(pin: Byte): TPinState;
 begin
   result := TPinState(PinsInfo[pin].value);
@@ -716,17 +794,12 @@ end;
 
 procedure TFirmata.analogReport(pin: Byte; enab: Boolean);
 begin
-  Write([REPORT_DIGITAL OR pin, Ord(enab)], false);
+  Write([REPORT_ANALOG OR pin, Ord(enab)], false);
 end;
 
 function TFirmata.ReturnAnalogPinNumber(pin: Byte): Byte;
 begin
-  if pin >= $A0 then
-  begin
-    result := AnalogPins[(pin and $0F)];
-  end
-  else
-    result := pin;
+  result := AnalogPins[(pin and $0F)];
 end;
 
 procedure TFirmata.analogWrite(pin: Byte; value: Word);
@@ -744,7 +817,7 @@ end;
 function TFirmata.analogRead(pin: Byte): Word;
 begin
   pin := ReturnAnalogPinNumber(pin);
-  analogRead := PinsInfo[pin].value;
+  result := PinsInfo[pin].value;
 end;
 
 procedure TFirmata.PrintPinInfo(Info: TStrings);
@@ -755,7 +828,7 @@ begin
   idx := 0;
   for pin in PinsInfo do
   begin
-    Info.Add(idx.Tostring + ':' + pin.analog_channel.Tostring);
+    Info.Add(idx.ToString + ':' + pin.analog_channel.ToString);
     Inc(idx);
   end;
 end;
@@ -862,7 +935,7 @@ end;
 procedure TFirmata.SerialListen(portID: TSerialPortID);
 begin
   if Ord(portID) < 8 then
-    exit;
+    Exit;
   // listen only applies to software serial ports
   Write([SERIAL_MESSAGE, SERIAL_LISTEN or Ord(portID)]);
 end;
@@ -878,7 +951,7 @@ var
   i: Integer;
 begin
   if Ord(portID) > 7 then
-    exit; // PortID > 7 are software serial
+    Exit; // PortID > 7 are software serial
 
   for i := 0 to 2 do
     baud[i] := ((baudRate shr (i * 7)) and $7F);
@@ -893,7 +966,7 @@ var
   i: Integer;
 begin
   if Ord(portID) < 8 then
-    exit; // PortID < 8 are hardware serial
+    Exit; // PortID < 8 are hardware serial
 
   for i := 0 to 2 do
     baud[i] := ((baudRate shr (i * 7)) and $7F);
@@ -969,18 +1042,18 @@ begin
     c := TimedPeek;
     if (c = $FF) or ((c >= $30) and (c <= $39)) or (detectDecimal and (c = $46))
     then
-      exit(c);
+      Exit(c);
     case lookahead of
       lhSkipAll:
         ;
       hlSkipNone:
-        exit($FF);
+        Exit($FF);
       lhSkipWhiteSpace:
         case c of
           $09, $32, $10, $13:
             ;
         else
-          exit($FF);
+          Exit($FF);
         end;
     end;
     read;
@@ -997,7 +1070,7 @@ begin
   repeat
     c := peek;
     if c <> $FF then
-      exit(c);
+      Exit(c);
   until ((GetTickCount - Start) >= FTimeout);
 end;
 
@@ -1011,7 +1084,7 @@ begin
   repeat
     c := read;
     if c <> $FF then
-      exit(c);
+      Exit(c);
   until ((GetTickCount - Start) >= FTimeout);
 end;
 
@@ -1024,7 +1097,7 @@ begin
   result := 0;
   c := peekNextDigit(lookahead, false);
   if c = $FF then
-    exit(0); // Timeout event
+    Exit(0); // Timeout event
 
   repeat
     if c <> ignore then
@@ -1063,7 +1136,7 @@ begin
   result := 0.0;
   c := peekNextDigit(lookahead, True);
   if c = $FF then
-    exit(0.0); // Timeout event
+    Exit(0.0); // Timeout event
 
   repeat
     if c <> ignore then
@@ -1160,7 +1233,7 @@ var
 begin
   result := 0;
   if Length < 0 then
-    exit;
+    Exit;
   while result < Length do
   begin
     value := TimedRead;

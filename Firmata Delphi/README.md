@@ -14,6 +14,7 @@ The firmata documentation is hosted  [here](https://github.com/firmata/protocol/
 
 ## Status
 <img src="https://d2v9ipibika81v.cloudfront.net/uploads/sites/240/2017/04/warning750.png" width="48"> In developer.
+
 ### Implemented:
 
 * Digital;
@@ -24,3 +25,6 @@ The firmata documentation is hosted  [here](https://github.com/firmata/protocol/
 * I2C;
 
 ### Tested:
+
+* Digital;
+* Analogic;

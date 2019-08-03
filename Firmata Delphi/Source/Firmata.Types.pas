@@ -34,6 +34,10 @@ type
   end;
 
   TAnalogPins = array [0 .. 15] of byte;
+  TAnalogPinsEnum = (A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13,
+    A14, A15);
+  TAnalogPinsSet = set of TAnalogPinsEnum;
+
   TPinInfos = array [0 .. 127] of TPin;
 
   TNotifySerialEvent = procedure(Sender: TObject; PortId: integer; msg: string)
@@ -110,6 +114,13 @@ type
     function Peek: byte;
     function Write(Data: byte): Boolean;
   end;
+
+  // Notify events
+  TDigitalChangeNotify = procedure(Sender: TObject; const PinNumber: integer;
+    const PinValue: TPinState) of object;
+
+  TAnalogChangeNotify = procedure(Sender: TObject;
+    const AnalogNumber: TAnalogPinsEnum; const value: Word) of object;
 
 implementation
 
@@ -259,6 +270,7 @@ begin
     Exit(False); // overflow
   Buffer[Head] := Data;
   Inc(Head);
+  Result := True;
 end;
 
 end.
