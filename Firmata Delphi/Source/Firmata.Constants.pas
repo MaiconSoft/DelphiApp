@@ -69,7 +69,7 @@ const
   PIN_MODE_OUTPUT = $01; // same as OUTPUT defined in Arduino.h
   PIN_MODE_ANALOG = $02; // analog pin in analogInput mode
   PIN_MODE_PWM = $03; // digital pin in PWM output mode
-  PIN_MODE_devVO = $04; // digital pin in devvo output mode
+  PIN_MODE_SERVO = $04; // digital pin in devvo output mode
   PIN_MODE_SHIFT = $05; // shiftIn/shiftOut mode
   PIN_MODE_I2C = $06; // pin included in I2C setup
   PIN_MODE_ONEWIRE = $07; // pin configured for 1-wire

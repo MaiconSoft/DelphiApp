@@ -34,6 +34,15 @@ type
     FSerials: array [TSerialPortID] of TSerial;
     FOnDigitalChange: TDigitalChangeNotify;
     FOnAnalogChange: TAnalogChangeNotify;
+    FOnBeginBoardCapability: TNotifyEvent;
+    FOnBoardChange: TBoardChangeNotify;
+    FOnFirmware: TFirmwareNotify;
+    FOnPinStateChange: TPinStateChangeNotify;
+    FOnStart: TNotifyEvent;
+    FOnStop: TNotifyEvent;
+    FOnFail: TNotifyEvent;
+    FOnReady: TNotifyEvent;
+    FPinSupported: TPinModes;
     function GetFirmwareName: string;
     function SettingsFileName: string;
     procedure Process(value: Byte);
@@ -67,8 +76,7 @@ type
     procedure setPinMode(pin: Byte; mode: TPinMode);
     procedure digitalWrite(pin: Byte; value: TPinState);
     procedure analogWrite(pin: Byte; value: Word);
-    procedure digitalReport(Port: Byte; enab: Boolean);
-    procedure analogReport(pin: Byte; enab: Boolean);
+
     function GetDigital(pin: Byte): TPinState;
     procedure SetDigital(pin: Byte; const value: TPinState);
     function GetAnalog(pin: Byte): Word;
@@ -92,26 +100,47 @@ type
       var DataOut: array of Byte); static;
     function GetPinMode(pin: Byte): TPinMode;
     procedure AskUpdate(Sender: TObject);
+    procedure AskFirmware;
     function GetTimed: Boolean;
     procedure SetTimed(const value: Boolean);
     procedure DoDigitalChange(pin: Integer);
     procedure DoAnalogChange(Number: Integer; value: Word);
+    procedure DoBeginBoardCapabilities;
+    procedure DoBoardChange(pin: Integer);
+    procedure DoFirmware;
+    procedure DoPinStateChange(pin: Integer);
+    procedure DoStart;
+    procedure DoStop;
+    procedure DoFail;
+    procedure DoReady;
+    function GetPinSupported(pin: Byte): TPinModes;
+    function GetPinRes(pin: Byte; mode: TPinMode): Byte;
+    function PinNumberToAnalog(pin: Byte): Integer;
+    function PinToInternal(pin: Byte): Byte;
+    function PinToExternal(pin: Byte): Byte;
+    function GetAnalogRelative(pin: Byte): double;
+    procedure SetAnalogRelative(pin: Byte; const value: double);
   protected
     { Protected declarations }
   public
     { Public declarations }
-    procedure AskFirmware;
     constructor Create(AOwner: TComponent); override;
     Destructor Destroy; override;
     function Start: Boolean; overload;
     function Start(Port: string): Boolean; overload;
     function Stop: Boolean;
     procedure SaveSettings;
+    procedure digitalReport(Port: Byte; enab: Boolean);
+    procedure analogReport(pin: Byte; enab: Boolean);
     property FirmwareName: string read GetFirmwareName;
     property Ready: Boolean read FReady;
     property Digital[pin: Byte]: TPinState read GetDigital write SetDigital;
     property Analog[pin: Byte]: Word read GetAnalog write SetAnalog;
+    property AnalogRelative[pin: Byte]: double read GetAnalogRelative
+      write SetAnalogRelative;
     property PinMode[pin: Byte]: TPinMode read GetPinMode write setPinMode;
+    property PinSupported[pin: Byte]: TPinModes read GetPinSupported;
+    property PinResolution[pin: Byte; mode: TPinMode]: Byte read GetPinRes;
   published
     { Published declarations }
     property TimedUpdate: Boolean read GetTimed write SetTimed;
@@ -125,6 +154,17 @@ type
     property Analogs: TAnalogPinsSet read FAnalogs write FAnalogs;
     property OnAnalogChange: TAnalogChangeNotify read FOnAnalogChange
       write FOnAnalogChange;
+    property OnBeginBoardCapability: TNotifyEvent read FOnBeginBoardCapability
+      write FOnBeginBoardCapability;
+    property OnBoardChange: TBoardChangeNotify read FOnBoardChange
+      write FOnBoardChange;
+    property OnFirmware: TFirmwareNotify read FOnFirmware write FOnFirmware;
+    property OnPinStateChange: TPinStateChangeNotify read FOnPinStateChange
+      write FOnPinStateChange;
+    property OnStart: TNotifyEvent read FOnStart write FOnStart;
+    property OnStop: TNotifyEvent read FOnStop write FOnStop;
+    property OnFail: TNotifyEvent read FOnFail write FOnFail;
+    property OnReady: TNotifyEvent read FOnReady write FOnReady;
   end;
 
   TLookAHead = (lhSkipAll, hlSkipNone, lhSkipWhiteSpace);
@@ -153,11 +193,11 @@ type
     function ParseInt(lookahead: TLookAHead; ignore: Byte): Integer; overload;
     function ParseInt(lookahead: TLookAHead): Integer; overload;
     function ParseInt(): Integer; overload;
-    function ParseFloat: Double; overload;
-    function ParseFloat(lookahead: TLookAHead): Double; overload;
-    function ParseFloat(lookahead: TLookAHead; ignore: Byte): Double; overload;
+    function ParseFloat: double; overload;
+    function ParseFloat(lookahead: TLookAHead): double; overload;
+    function ParseFloat(lookahead: TLookAHead; ignore: Byte): double; overload;
     function ParseFloat(lookahead: TLookAHead; ignore: AnsiChar)
-      : Double; overload;
+      : double; overload;
     function ReadBytesUntil(terminator: AnsiChar; var Buffer: AnsiString;
       Length: Integer): Integer; overload;
     function ReadBytesUntil(terminator: Byte; var Buffer: array of Byte;
@@ -175,12 +215,18 @@ type
   end;
 
 procedure Register;
+function PinModeToString(mode: TPinMode): string;
 
 implementation
 
 procedure Register;
 begin
   RegisterComponents('Firmata', [TFirmata]);
+end;
+
+function PinModeToString(mode: TPinMode): string;
+begin
+  result := PIN_MODE_STR[mode];
 end;
 
 { TFirmata }
@@ -201,6 +247,7 @@ begin
   begin
     digitalReport(i, True);
     analogReport(i, True);
+    setPinMode(ReturnAnalogPinNumber(i), pmAnalog);
   end;
 end;
 
@@ -292,8 +339,17 @@ begin
   result := analogRead(pin);
 end;
 
+function TFirmata.GetAnalogRelative(pin: Byte): double;
+var
+  max: Integer;
+begin
+  max := (1 shl GetPinRes(pin, pmAnalog)) - 1;
+  result := 100 * analogRead(pin) / max;
+end;
+
 function TFirmata.GetDigital(pin: Byte): TPinState;
 begin
+  pin := PinToInternal(pin);
   result := digitalRead(pin);
 end;
 
@@ -304,7 +360,22 @@ end;
 
 function TFirmata.GetPinMode(pin: Byte): TPinMode;
 begin
+  if pin >= $A0 then
+    pin := ReturnAnalogPinNumber(pin and $0F);
+
   result := TPinMode(PinsInfo[pin].mode);
+end;
+
+function TFirmata.GetPinRes(pin: Byte; mode: TPinMode): Byte;
+begin
+  if pin >= $A0 then
+    pin := ReturnAnalogPinNumber(pin and $0F);
+  result := PinsInfo[pin].resolution[Ord(mode)];
+end;
+
+function TFirmata.GetPinSupported(pin: Byte): TPinModes;
+begin
+  result := PinsInfo[pin].supported_modes;
 end;
 
 function TFirmata.GetTimed: Boolean;
@@ -336,9 +407,9 @@ begin
   begin
     with PinsInfo[i] do
     begin
-      mode := MODE_NONE;
+      mode := pmIgnore;
       analog_channel := i;
-      supported_modes := 0;
+      supported_modes := [];
       value := 0;
     end;
   end;
@@ -401,14 +472,14 @@ begin
   begin
     with PinsInfo[offset + i] do
     begin
-      if (mode = PIN_MODE_INPUT) or (mode = PIN_MODE_PULLUP) then
+      if (mode = pmInput) or (mode = pmPullUp) then
       begin
-        if value <> Parse.Bit[i] then
-        begin
-          value := Parse.Bit[i];
-          DoDigitalChange(i);
-          SavLog('value[' + (offset + i).ToString + '] ' + value.ToString);
-        end;
+        // if value <> Parse.Bit[i] then
+        // begin
+        value := Parse.Bit[i];
+        DoDigitalChange(offset + i);
+        // SavLog('value[' + (offset + i).ToString + '] ' + value.ToString);
+        // end;
       end;
     end;
   end;
@@ -435,46 +506,49 @@ begin
   Major := Buffer.Data[1];
   Minor := Buffer.Data[2];
   FFirmwareName := Format('%s - %d.%d', [Buffer.ToString(3), Major, Minor]);
+  DoFirmware;
 end;
 
 procedure TFirmata.CapabilityResponse;
 var
-  idx, pin: Integer;
-  isResolution: Boolean;
+  idx, pin, Analog: Integer;
   mode: Byte;
 begin
   idx := 1;
   mode := 0;
-  isResolution := false;
   pin := 0;
+  Analog := 0;
   for pin := 0 to 127 do
   begin
-    PinsInfo[pin].supported_modes := 0;
+    PinsInfo[pin].supported_modes := [];
   end;
 
+  DoBeginBoardCapabilities;
+  pin := 0;
   while idx < Buffer.count do
   begin
     if (Buffer.Data[idx] = CAPABILITY_PIN_SEPARATOR) then
     begin
-      Inc(pin);
-      isResolution := false;
-    end;
-
-    if (isResolution) then
-    begin
-      PinsInfo[pin].resolution[mode] := Buffer.Data[idx];
+      if pmAnalog in PinsInfo[pin].supported_modes then
+      begin
+        DoBoardChange($A0 + Analog);
+        inc(Analog);
+      end
+      else
+        DoBoardChange(pin);
+      inc(pin);
     end
     else
     begin
       mode := Buffer.Data[idx];
-      PinsInfo[pin].supported_modes := PinsInfo[pin].supported_modes or
-        (1 shl mode);
+      Include(PinsInfo[pin].supported_modes, TPinMode(mode));
+      inc(idx);
+      PinsInfo[pin].resolution[mode] := Buffer.Data[idx];
     end;
-
-    isResolution := not isResolution;
-    Inc(idx);
+    inc(idx);
   end;
   FReady := True;
+  DoReady;
 end;
 
 procedure TFirmata.AnalogMappingResponse;
@@ -488,11 +562,8 @@ begin
     PinsInfo[i].analog_channel := value;
     if value <> ANALOG_CHANNEL_NONE then
     begin
-      SavLog('mapping analog pin: ' + aPin.ToString);
-      SavLog('mapping analog index: ' + i.ToString);
-      SavLog('mapping analog value: ' + value.ToString);
       AnalogPins[aPin] := i;
-      Inc(aPin);
+      inc(aPin);
     end;
   end;
 end;
@@ -506,7 +577,11 @@ begin
     Exit;
 
   pin := Buffer.Data[1];
-  PinsInfo[pin].mode := Buffer.Data[2];
+  if Buffer.Data[2] = PIN_MODE_IGNORE then
+    PinsInfo[pin].mode := pmIgnore
+  else
+    PinsInfo[pin].mode := TPinMode(Buffer.Data[2]);
+
   PinsInfo[pin].value := Buffer.Data[3];
 
   if (Buffer.count > 4) then
@@ -515,6 +590,9 @@ begin
       PinsInfo[pin].value := (PinsInfo[pin].value) or
         (Buffer.Data[3 + i] shl (7 * i));
   end;
+  SavLog('Mode ' + PinModeToString(PinsInfo[pin].mode));
+  SavLog('Pin ' + pin.ToString);
+  DoPinStateChange(pin);
 end;
 
 procedure TFirmata.I2cReply;
@@ -535,7 +613,7 @@ begin
       I2CMemory[sAddres][reg] := Data
     else
       I2CMemory[sAddres].Add(reg, Data);
-    Inc(idx, 4);
+    inc(idx, 4);
   end;
 end;
 
@@ -553,7 +631,7 @@ begin
   begin
     c := AnsiChar(Buffer.Data[idx] or (Buffer.Data[idx + 1] shl 7));
     Msg := Msg + c;
-    Inc(idx, 2);
+    inc(idx, 2);
     FSerials[TSerialPortID(portID)].FBuffer.Write(Ord(c));
   end;
   if Assigned(FOnSerialReceve) then
@@ -563,6 +641,16 @@ end;
 procedure TFirmata.SetAnalog(pin: Byte; const value: Word);
 begin
   analogWrite(pin, value);
+end;
+
+procedure TFirmata.SetAnalogRelative(pin: Byte; const value: double);
+var
+  max: Integer;
+begin
+  max := (1 shl GetPinRes(pin, pmPWM)) - 1;
+  if max = 0 then
+    Exit;
+  analogWrite(pin, max * value / 100);
 end;
 
 procedure TFirmata.SetDigital(pin: Byte; const value: TPinState);
@@ -584,7 +672,7 @@ begin
     c := AnsiChar((Buffer.Data[idx] and $7F) or
       ((Buffer.Data[idx + 1] and $7F) shl 7));
     Msg := Msg + c;
-    Inc(idx, 2);
+    inc(idx, 2);
   end;
 
   if Assigned(FOnSerialDataReceve) then
@@ -670,6 +758,8 @@ begin
   result := True;
   try
     SerialDriver.Open();
+    DoStart;
+    AskFirmware;
   except
     result := false;
   end;
@@ -688,6 +778,7 @@ begin
     Exit;
   try
     SerialDriver.Close();
+    DoStop;
   except
     result := false;
   end;
@@ -757,16 +848,38 @@ begin
     WriteTail;
 end;
 
+function TFirmata.PinToInternal(pin: Byte): Byte;
+begin
+  if pin >= $A0 then
+    result := ReturnAnalogPinNumber(pin and $0F)
+  else
+    result := pin;
+end;
+
+function TFirmata.PinToExternal(pin: Byte): Byte;
+begin
+  if pmAnalog in PinsInfo[pin].supported_modes then
+    result := $A0 + PinNumberToAnalog(pin)
+  else
+    result := pin;
+end;
+
 procedure TFirmata.setPinMode(pin: Byte; mode: TPinMode);
 begin
-  Write([SET_PIN_MODE, ReturnAnalogPinNumber(pin), Ord(mode)], false);
-  PinsInfo[pin].mode := Ord(mode);
-  PinsInfo[pin].value := 0;
+  pin := PinToInternal(pin);
+
+  Write([SET_PIN_MODE, pin, Ord(mode)], false);
+  Write([PIN_STATE_QUERY, pin]);
+
+  analogReport(pin, mode = pmAnalog);
+  digitalReport(pin div 8, (mode = pmInput) or (mode = pmPullUp));
 end;
 
 procedure TFirmata.digitalWrite(pin: Byte; value: TPinState);
 begin
-  Write([SET_DIGITAL_PIN_VALUE, ReturnAnalogPinNumber(pin), Ord(value)], false);
+  pin := PinToInternal(pin);
+
+  Write([SET_DIGITAL_PIN_VALUE, pin, Ord(value)], false);
   PinsInfo[pin].value := Ord(value);
 end;
 
@@ -776,10 +889,69 @@ begin
     OnAnalogChange(Self, TAnalogPinsEnum(Number), value);
 end;
 
-procedure TFirmata.DoDigitalChange(pin: Integer);
+procedure TFirmata.DoBeginBoardCapabilities;
 begin
+  if Assigned(FOnBeginBoardCapability) then
+    FOnBeginBoardCapability(Self);
+end;
+
+procedure TFirmata.DoBoardChange(pin: Integer);
+begin
+  if Assigned(FOnBoardChange) then
+    FOnBoardChange(Self, pin, PinsInfo[pin]);
+end;
+
+procedure TFirmata.DoDigitalChange(pin: Integer);
+var
+  value: TPinState;
+begin
+  value := TPinState(PinsInfo[pin].value);
+
+  pin := PinToExternal(pin);
+
   if Assigned(FOnDigitalChange) then
-    FOnDigitalChange(Self, pin, TPinState(PinsInfo[pin].value));
+    FOnDigitalChange(Self, pin, value);
+end;
+
+procedure TFirmata.DoFail;
+begin
+  if Assigned(FOnFail) then
+    FOnFail(Self);
+end;
+
+procedure TFirmata.DoFirmware;
+begin
+  if Assigned(FOnFirmware) then
+    FOnFirmware(Self, FFirmwareName);
+end;
+
+procedure TFirmata.DoPinStateChange(pin: Integer);
+var
+  Info: TPin;
+begin
+  Info := PinsInfo[pin];
+  pin := PinToExternal(pin);
+
+  if Assigned(FOnPinStateChange) then
+    FOnPinStateChange(Self, pin, Info);
+end;
+
+procedure TFirmata.DoReady;
+begin
+  if Assigned(FOnReady) then
+    FOnReady(Self);
+end;
+
+procedure TFirmata.DoStart;
+begin
+  if Assigned(FOnStart) then
+    FOnStart(Self);
+end;
+
+procedure TFirmata.DoStop;
+begin
+  if Assigned(FOnStop) then
+    FOnStop(Self);
 end;
 
 function TFirmata.digitalRead(pin: Byte): TPinState;
@@ -802,10 +974,27 @@ begin
   result := AnalogPins[(pin and $0F)];
 end;
 
+function TFirmata.PinNumberToAnalog(pin: Byte): Integer;
+var
+  i: Integer;
+begin
+  for i := 0 to High(AnalogPins) do
+    if AnalogPins[i] = pin then
+      Exit(i);
+  result := -1;
+end;
+
 procedure TFirmata.analogWrite(pin: Byte; value: Word);
 var
   Buf: array [0 .. 2] of Byte;
 begin
+  pin := PinToInternal(pin);
+  if not(pmPWM in PinsInfo[pin].supported_modes) then
+    Exit;
+
+  if (pmPWM <> PinsInfo[pin].mode) then
+    setPinMode(pin, pmPWM);
+
   Buf[0] := ANALOG_MESSAGE OR pin;
   Buf[1] := value AND $7F;
   Buf[2] := (value shr 7) AND $7F;
@@ -829,7 +1018,7 @@ begin
   for pin in PinsInfo do
   begin
     Info.Add(idx.ToString + ':' + pin.analog_channel.ToString);
-    Inc(idx);
+    inc(idx);
   end;
 end;
 
@@ -1021,7 +1210,7 @@ begin
   FParent.SerialListen(FPortID);
 end;
 
-function TSerial.ParseFloat: Double;
+function TSerial.ParseFloat: double;
 begin
   result := ParseFloat(lhSkipAll, 0);
 end;
@@ -1097,7 +1286,8 @@ begin
   result := 0;
   c := peekNextDigit(lookahead, false);
   if c = $FF then
-    Exit(0); // Timeout event
+    Exit(0);
+  // Timeout event
 
   repeat
     if c <> ignore then
@@ -1119,16 +1309,16 @@ begin
   result := ParseInt(lookahead, 0);
 end;
 
-function TSerial.ParseFloat(lookahead: TLookAHead): Double;
+function TSerial.ParseFloat(lookahead: TLookAHead): double;
 begin
   result := ParseFloat(lookahead, 0);
 end;
 
-function TSerial.ParseFloat(lookahead: TLookAHead; ignore: Byte): Double;
+function TSerial.ParseFloat(lookahead: TLookAHead; ignore: Byte): double;
 var
   isNegative, isFraction: Boolean;
   c: Byte;
-  fraction: Double;
+  fraction: double;
 begin
   isNegative := false;
   isFraction := false;
@@ -1162,7 +1352,7 @@ begin
     result := result * fraction;
 end;
 
-function TSerial.ParseFloat(lookahead: TLookAHead; ignore: AnsiChar): Double;
+function TSerial.ParseFloat(lookahead: TLookAHead; ignore: AnsiChar): double;
 begin
   result := ParseFloat(lookahead, Ord(ignore));
 end;

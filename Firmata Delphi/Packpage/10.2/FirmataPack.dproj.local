@@ -3,10 +3,10 @@
 	<Transactions>
     <Transaction>2019/07/19 18:21:23.000.961,=rtl.dcp</Transaction>
     <Transaction>2019/07/19 18:21:45.000.695,=D:\Programação\Git\Firmata Delphi\Source\Firmata.pas</Transaction>
-    <Transaction>2019/07/19 18:22:44.000.995,D:\Programação\Local\Delphi\Fontes\Package1.dproj=D:\Programação\Git\Firmata Delphi\Packpage\10.2\FirmataPack.dproj</Transaction>
+    <Transaction>2019/07/19 18:22:44.000.995,D:\Programação\Git\Firmata Delphi\Packpage\10.2\FirmataPack.dproj=D:\Programação\Local\Delphi\Fontes\Package1.dproj</Transaction>
     <Transaction>2019/07/19 18:26:33.000.934,=D:\Programação\Git\Firmata Delphi\Source\Resource\Icon24.bmp</Transaction>
     <Transaction>2019/07/19 18:31:56.000.970,=D:\Programação\Git\Firmata Delphi\Packpage\10.2\Unit1.pas</Transaction>
-    <Transaction>2019/07/19 18:32:10.000.113,D:\Programação\Git\Firmata Delphi\Packpage\10.2\Unit1.pas=D:\Programação\Git\Firmata Delphi\Source\Firmata.Types.pas</Transaction>
+    <Transaction>2019/07/19 18:32:10.000.113,D:\Programação\Git\Firmata Delphi\Source\Firmata.Types.pas=D:\Programação\Git\Firmata Delphi\Packpage\10.2\Unit1.pas</Transaction>
     <Transaction>2019/08/02 18:39:05.000.865,=vcl.dcp</Transaction>
     <Transaction>2019/08/02 18:39:05.000.877,=CPort_R.dcp</Transaction>
   </Transactions>

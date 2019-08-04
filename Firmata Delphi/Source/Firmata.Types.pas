@@ -13,10 +13,24 @@ type
 
   TModeResolution = array [0 .. 15] of byte;
 
+  // all pin mode
+  TPinMode = (pmInput = PIN_MODE_INPUT, pmOutput, pmAnalog, pmPWM, pmServo,
+    pmShift, pmI2C, pmOneWire, pmStepper, pmEncoder, pmSerial, pmPullUp,
+    pmIgnore);
+
+  TPinModes = set of TPinMode;
+
+const
+  PIN_MODE_STR: array [TPinMode] of string = ('INPUT', 'OUTPUT', 'ANALOG',
+    'PWM', 'SERVO', 'SHIFT', 'I2C', 'ONEWIRE', 'STEPPER', 'ENCODER', 'SERIAL',
+    'PULL UP', 'IGNORE');
+
+type
+
   TPin = record
-    mode: byte;
+    mode: TPinMode;
     analog_channel: byte;
-    supported_modes: UInt64;
+    supported_modes: TPinModes;
     resolution: TModeResolution;
     value: integer;
   end;
@@ -48,11 +62,6 @@ type
   TVersion = record
     Major, Minor: byte;
   end;
-
-  // all pin mode
-  TPinMode = (pmInput = PIN_MODE_INPUT, pmOutput, pmAnalog, pmPWM, pmDevVo,
-    pmShift, pmI2C, pmOneWire, pmStepper, pmEncoder, pmSerial, pmPullUp,
-    pmIgnore = PIN_MODE_IGNORE);
 
   // pin digital state
   TPinState = (psLow = 0, psHigh = 1);
@@ -121,6 +130,14 @@ type
 
   TAnalogChangeNotify = procedure(Sender: TObject;
     const AnalogNumber: TAnalogPinsEnum; const value: Word) of object;
+
+  TBoardChangeNotify = procedure(Sender: TObject; const Pin: integer;
+    Info: TPin) of object;
+
+  TFirmwareNotify = procedure(Sender: TObject; const FirmwareName: string)
+    of object;
+
+  TPinStateChangeNotify = TBoardChangeNotify;
 
 implementation
 
